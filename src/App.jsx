@@ -1,4 +1,30 @@
 import { useState, useEffect, useRef } from "react";
+import { callClaude } from "./lib/claude";
+
+const HAS_API_KEY = !!import.meta.env.VITE_ANTHROPIC_API_KEY;
+
+const AGENT_SYSTEM_PROMPTS = {
+  webdev: "You are a website developer agent. Audit the given task and return 4-5 actionable bullet points with findings and recommendations. Be specific and technical.",
+  market: "You are a market research agent. Analyze the given task and return 4-5 bullet points with market insights, trends, and competitor findings.",
+  leadgen: "You are a lead generation agent. For the given task, return 4-5 bullet points describing lead sources found, qualification criteria, and estimated numbers.",
+  email: "You are an email campaign agent. For the given task, return 4-5 bullet points with email strategy, subject line ideas, and send schedule.",
+  social: "You are a social media agent. For the given task, return 4-5 bullet points with platform strategy, content ideas, and posting schedule.",
+  content: "You are a content creation agent. For the given task, return 4-5 bullet points with content formats, key messages, and production plan.",
+  scheduler: "You are a content scheduler agent. For the given task, return 4-5 bullet points with scheduling strategy, optimal times, and platform assignments.",
+};
+
+const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
+You have 7 sub-agents: Website Dev (webdev), Market Research (market), Lead Gen (leadgen), Email Campaign (email), Social Media (social), Content Creation (content), Content Scheduler (scheduler).
+
+Given the user's command, respond in JSON only:
+{
+  "plan": "brief plan description",
+  "agents": [
+    {"id": "agentId", "task": "specific task for this agent"}
+  ]
+}
+
+Only include agents relevant to the command. Max 4 agents.`;
 
 // ─── DATA ────────────────────────────────────────────────────────────────────
 
@@ -119,6 +145,7 @@ function statusColor(s) {
   if (s === "active" || s === "running") return "#34D399";
   if (s === "done") return "#38BDF8";
   if (s === "queued") return "#FBBF24";
+  if (s === "error") return "#ef4444";
   return "#ffffff33";
 }
 
@@ -126,6 +153,7 @@ function statusLabel(s) {
   if (s === "running") return "RUNNING";
   if (s === "done") return "DONE";
   if (s === "queued") return "QUEUED";
+  if (s === "error") return "ERROR";
   return "IDLE";
 }
 
@@ -186,7 +214,7 @@ function AgentCard({ agent, isSelected, onClick, pulse }) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor(agent.status), boxShadow: agent.status === "running" ? `0 0 8px ${statusColor(agent.status)}` : "none" }} />
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor(agent.status), boxShadow: agent.status === "running" ? `0 0 8px ${statusColor(agent.status)}` : "none", animation: agent.status === "running" ? "statusGlow 2s ease infinite" : "none" }} />
           <span style={{ color: statusColor(agent.status), fontSize: 9, fontFamily: "'DM Mono', monospace" }}>
             {statusLabel(agent.status)}
           </span>
@@ -230,7 +258,7 @@ function AgentCard({ agent, isSelected, onClick, pulse }) {
 
 // ─── CEO PANEL ───────────────────────────────────────────────────────────────
 
-function CEOPanel({ agents, onOrchestrate, orchestrating, activeFlow }) {
+function CEOPanel({ agents, onOrchestrate, orchestrating, activeFlow, ceoInput, setCeoInput, ceoThinking, onCEOCommand, ceoLogs }) {
   const totalActive = agents.filter(a => a.status === "running").length;
   const totalDone = agents.filter(a => a.status === "done").length;
 
@@ -277,7 +305,7 @@ function CEOPanel({ agents, onOrchestrate, orchestrating, activeFlow }) {
         </div>
 
         {/* Stats */}
-        <div style={{ display: "flex", gap: 12 }}>
+        <div className="ceo-stats" style={{ display: "flex", gap: 12 }}>
           {[
             { label: "AGENTS", val: agents.length, color: "#ffffff" },
             { label: "RUNNING", val: totalActive, color: "#34D399" },
@@ -306,38 +334,63 @@ function CEOPanel({ agents, onOrchestrate, orchestrating, activeFlow }) {
           border: "1px solid #F0C04033",
           borderRadius: 12,
           padding: "10px 14px",
-          color: "#ffffff55",
-          fontFamily: "'DM Sans', sans-serif",
-          fontSize: 13,
           display: "flex",
           alignItems: "center",
           gap: 8,
         }}>
           <span style={{ color: "#F0C04066" }}>◈</span>
-          <span>Ketik perintah ke CEO Agent... (e.g. "Launch campaign produk baru")</span>
+          <input
+            value={ceoInput}
+            onChange={(e) => setCeoInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !ceoThinking) onCEOCommand(ceoInput); }}
+            placeholder='Ketik perintah ke CEO Agent... (e.g. "Launch campaign produk baru")'
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "#ffffffdd",
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: 13,
+            }}
+          />
         </div>
-        <button style={{
-          background: "linear-gradient(135deg, #F0C040, #F59E0B)",
-          border: "none",
-          borderRadius: 12,
-          padding: "10px 20px",
-          color: "#000",
-          fontFamily: "'Syne', sans-serif",
-          fontWeight: 800,
-          fontSize: 13,
-          cursor: "pointer",
-          letterSpacing: 0.5,
-        }}>
-          EXECUTE
+        <button
+          onClick={() => onCEOCommand(ceoInput)}
+          disabled={ceoThinking}
+          style={{
+            background: ceoThinking ? "#F0C04055" : "linear-gradient(135deg, #F0C040, #F59E0B)",
+            border: "none",
+            borderRadius: 12,
+            padding: "10px 20px",
+            color: "#000",
+            fontFamily: "'Syne', sans-serif",
+            fontWeight: 800,
+            fontSize: 13,
+            cursor: ceoThinking ? "not-allowed" : "pointer",
+            letterSpacing: 0.5,
+          }}>
+          {ceoThinking ? "THINKING…" : "EXECUTE"}
         </button>
       </div>
+
+      {/* CEO Log feed */}
+      {ceoLogs.length > 0 && (
+        <div style={{ marginTop: 10, maxHeight: 72, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {[...ceoLogs].reverse().map((log, i) => (
+            <div key={i} style={{ color: i === 0 ? '#F0C040' : '#ffffff44', fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
+              {i === 0 ? '◈ ' : '  '}{log.text}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Orchestra Flows */}
       <div style={{ marginTop: 16 }}>
         <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 1.5, marginBottom: 10 }}>
           ORCHESTRATION PRESETS
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div className="flow-buttons" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {ORCHESTRA_FLOWS.map(flow => (
             <button
               key={flow.id}
@@ -368,7 +421,7 @@ function CEOPanel({ agents, onOrchestrate, orchestrating, activeFlow }) {
 function AgentDetailPanel({ agent, onClose }) {
   if (!agent) return null;
   return (
-    <div style={{
+    <div className="detail-panel" style={{
       position: "fixed",
       right: 24,
       top: "50%",
@@ -381,6 +434,7 @@ function AgentDetailPanel({ agent, onClose }) {
       boxShadow: `0 0 40px ${agent.color}22, 0 24px 60px rgba(0,0,0,0.6)`,
       backdropFilter: "blur(20px)",
       zIndex: 100,
+      animation: "slideInRight 0.25s ease",
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -471,6 +525,154 @@ function ConnectionLines({ activeChain, agents }) {
   );
 }
 
+// ─── CUSTOM FLOW BUILDER ─────────────────────────────────────────────────────
+
+function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
+  const allAgentIds = ["webdev", "market", "leadgen", "email", "social", "content", "scheduler"];
+
+  const toggleAgent = (id) => {
+    setCustomFlow(prev => ({
+      ...prev,
+      chain: prev.chain.includes(id)
+        ? prev.chain.filter(x => x !== id)
+        : [...prev.chain, id],
+    }));
+  };
+
+  const moveUp = (i) => {
+    if (i === 0) return;
+    setCustomFlow(prev => {
+      const chain = [...prev.chain];
+      [chain[i - 1], chain[i]] = [chain[i], chain[i - 1]];
+      return { ...prev, chain };
+    });
+  };
+
+  const moveDown = (i) => {
+    setCustomFlow(prev => {
+      const chain = [...prev.chain];
+      if (i >= chain.length - 1) return prev;
+      [chain[i], chain[i + 1]] = [chain[i + 1], chain[i]];
+      return { ...prev, chain };
+    });
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+      backdropFilter: "blur(4px)", zIndex: 200, display: "flex",
+      alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <div style={{
+        background: "#0d0d1a", border: "1px solid #ffffff15",
+        borderRadius: 20, padding: 28, width: "100%", maxWidth: 480,
+        maxHeight: "80vh", overflowY: "auto",
+        boxShadow: "0 24px 80px rgba(0,0,0,0.8)",
+        animation: "slideInBottom 0.25s ease",
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ color: "#fff", fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18 }}>
+              Custom Flow Builder
+            </div>
+            <div style={{ color: "#ffffff55", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
+              Pilih & urutkan agent untuk flow kamu
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#ffffff66", cursor: "pointer", fontSize: 20 }}>✕</button>
+        </div>
+
+        {/* Flow name input */}
+        <input
+          value={customFlow.name}
+          onChange={e => setCustomFlow(prev => ({ ...prev, name: e.target.value }))}
+          style={{
+            width: "100%", background: "#ffffff08", border: "1px solid #ffffff15",
+            borderRadius: 10, padding: "10px 14px", color: "#fff",
+            fontFamily: "'DM Sans', sans-serif", fontSize: 13, marginBottom: 18,
+            outline: "none",
+          }}
+          placeholder="Flow name..."
+        />
+
+        {/* Agent toggles */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 1, marginBottom: 10 }}>
+            SELECT AGENTS
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {allAgentIds.map(id => {
+              const meta = SUB_AGENTS.find(a => a.id === id);
+              const selected = customFlow.chain.includes(id);
+              return (
+                <button key={id} onClick={() => toggleAgent(id)} style={{
+                  background: selected ? `${meta.color}18` : "#ffffff06",
+                  border: `1px solid ${selected ? meta.color + "55" : "#ffffff10"}`,
+                  borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                  transition: "all 0.15s",
+                }}>
+                  <span style={{ color: meta.color, fontSize: 16 }}>{meta.icon}</span>
+                  <span style={{ color: selected ? "#fff" : "#ffffff66", fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: selected ? 600 : 400 }}>
+                    {meta.name}
+                  </span>
+                  {selected && <span style={{ marginLeft: "auto", color: meta.color, fontSize: 14 }}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Order editor — show only if agents selected */}
+        {customFlow.chain.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 1, marginBottom: 10 }}>
+              EXECUTION ORDER
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {customFlow.chain.map((id, i) => {
+                const meta = SUB_AGENTS.find(a => a.id === id);
+                return (
+                  <div key={id} style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    background: "#ffffff06", border: "1px solid #ffffff10",
+                    borderRadius: 10, padding: "8px 12px",
+                  }}>
+                    <span style={{ color: "#ffffff33", fontFamily: "'DM Mono', monospace", fontSize: 11, minWidth: 20 }}>{i + 1}</span>
+                    <span style={{ color: meta.color }}>{meta.icon}</span>
+                    <span style={{ color: "#ffffffcc", fontFamily: "'DM Sans', sans-serif", fontSize: 12, flex: 1 }}>{meta.name}</span>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button onClick={() => moveUp(i)} style={{ background: "#ffffff0a", border: "none", borderRadius: 6, color: "#ffffff66", cursor: "pointer", padding: "3px 7px", fontSize: 11 }}>↑</button>
+                      <button onClick={() => moveDown(i)} style={{ background: "#ffffff0a", border: "none", borderRadius: 6, color: "#ffffff66", cursor: "pointer", padding: "3px 7px", fontSize: 11 }}>↓</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Run button */}
+        <button
+          onClick={() => { onRun({ id: "custom", ...customFlow }); onClose(); }}
+          disabled={customFlow.chain.length === 0}
+          style={{
+            width: "100%", background: customFlow.chain.length > 0 ? "linear-gradient(135deg, #F0C040, #F59E0B)" : "#ffffff10",
+            border: "none", borderRadius: 12, padding: "13px",
+            color: customFlow.chain.length > 0 ? "#000" : "#ffffff33",
+            fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 14,
+            cursor: customFlow.chain.length > 0 ? "pointer" : "not-allowed",
+            letterSpacing: 0.5,
+          }}
+        >
+          ▶ RUN CUSTOM FLOW ({customFlow.chain.length} agents)
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 
 export default function AgenticDashboard() {
@@ -479,7 +681,18 @@ export default function AgenticDashboard() {
   const [orchestrating, setOrchestrating] = useState(false);
   const [activeFlow, setActiveFlow] = useState(null);
   const [activeChainStep, setActiveChainStep] = useState(-1);
+  const [ceoInput, setCeoInput] = useState("");
+  const [ceoThinking, setCeoThinking] = useState(false);
+  const [ceoLogs, setCeoLogs] = useState([]);
+  const [showFlowBuilder, setShowFlowBuilder] = useState(false);
+  const [customFlow, setCustomFlow] = useState({ name: "Custom Flow", chain: [] });
   const timerRef = useRef(null);
+  const cancelRef = useRef(false);
+
+  const addCeoLog = (text) =>
+    setCeoLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString() }]);
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   const LOG_MESSAGES = {
     webdev: [
@@ -512,8 +725,54 @@ export default function AgenticDashboard() {
     ],
   };
 
-  const runOrchestration = (flow) => {
+  // Simulation fallback for one agent step (interval-based, returns a promise)
+  const runFakeStep = (agentId) => new Promise((resolve) => {
+    const msgs = LOG_MESSAGES[agentId] || ["Processing...", "Done ✓"];
+    let msgIndex = 0;
+
+    const progressInterval = setInterval(() => {
+      const progressStep = Math.floor(100 / msgs.length);
+      const currentProgress = Math.min((msgIndex + 1) * progressStep, 100);
+
+      setAgents(prev => prev.map(a =>
+        a.id === agentId
+          ? {
+              ...a,
+              progress: currentProgress,
+              logs: msgIndex < msgs.length ? [...a.logs, msgs[msgIndex]] : a.logs,
+            }
+          : a
+      ));
+
+      msgIndex++;
+
+      if (msgIndex >= msgs.length) {
+        clearInterval(progressInterval);
+        resolve();
+      }
+    }, 500);
+
+    timerRef.current = progressInterval;
+  });
+
+  // Real Claude-backed step — streams response lines as logs
+  const runClaudeStep = async (agentId, task) => {
+    const text = await callClaude(AGENT_SYSTEM_PROMPTS[agentId], task || "Lakukan tugas standar.");
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    const total = lines.length || 1;
+    for (let i = 0; i < lines.length; i++) {
+      if (cancelRef.current) return;
+      const progress = Math.min(Math.round(((i + 1) / total) * 100), 100);
+      setAgents(prev => prev.map(a =>
+        a.id === agentId ? { ...a, progress, logs: [...a.logs, lines[i]] } : a
+      ));
+      await sleep(300);
+    }
+  };
+
+  const runOrchestration = async (flow) => {
     if (orchestrating) return;
+    cancelRef.current = false;
     setActiveFlow(flow);
     setOrchestrating(true);
 
@@ -525,71 +784,115 @@ export default function AgenticDashboard() {
       logs: flow.chain.includes(a.id) ? ["Queued — menunggu giliran..."] : ["Standby"],
     })));
 
-    let stepIndex = 0;
+    await sleep(400);
 
-    const runStep = () => {
-      if (stepIndex >= flow.chain.length) {
-        // All done
-        setOrchestrating(false);
-        setActiveChainStep(-1);
-        setActiveFlow(prev => ({ ...prev, done: true }));
-        return;
-      }
-
+    for (let stepIndex = 0; stepIndex < flow.chain.length; stepIndex++) {
+      if (cancelRef.current) break;
       const agentId = flow.chain[stepIndex];
       setActiveChainStep(stepIndex);
 
-      // Mark as running
-      setAgents(prev => prev.map(a =>
-        a.id === agentId ? { ...a, status: "running", progress: 0, logs: [...a.logs, "▶ Mulai bekerja..."] } : a
-      ));
+      // Mark as running and capture its current task
+      let taskForAgent = "";
+      setAgents(prev => prev.map(a => {
+        if (a.id !== agentId) return a;
+        taskForAgent = a.task;
+        return { ...a, status: "running", progress: 0, logs: [...a.logs, "▶ Mulai bekerja..."] };
+      }));
 
-      const msgs = LOG_MESSAGES[agentId] || ["Processing...", "Done ✓"];
-      let msgIndex = 0;
-
-      const progressInterval = setInterval(() => {
-        const progressStep = Math.floor(100 / msgs.length);
-        const currentProgress = Math.min((msgIndex + 1) * progressStep, 100);
-
+      try {
+        if (HAS_API_KEY) {
+          await runClaudeStep(agentId, taskForAgent);
+        } else {
+          await runFakeStep(agentId);
+        }
+        if (cancelRef.current) break;
+        setAgents(prev => prev.map(a =>
+          a.id === agentId ? { ...a, status: "done", progress: 100 } : a
+        ));
+      } catch (err) {
         setAgents(prev => prev.map(a =>
           a.id === agentId
-            ? {
-                ...a,
-                progress: currentProgress,
-                logs: msgIndex < msgs.length ? [...a.logs, msgs[msgIndex]] : a.logs,
-              }
+            ? { ...a, status: "error", logs: [...a.logs, `✗ ERROR: ${err.message}`] }
             : a
         ));
+        break; // stop the chain on error
+      }
 
-        msgIndex++;
+      await sleep(600);
+    }
 
-        if (msgIndex >= msgs.length) {
-          clearInterval(progressInterval);
-          // Mark done
-          setAgents(prev => prev.map(a =>
-            a.id === agentId ? { ...a, status: "done", progress: 100 } : a
-          ));
-          stepIndex++;
-          setTimeout(runStep, 600);
-        }
-      }, 500);
+    setOrchestrating(false);
+    setActiveChainStep(-1);
+    if (!cancelRef.current) setActiveFlow(prev => prev ? { ...prev, done: true } : prev);
+  };
 
-      timerRef.current = progressInterval;
-    };
+  const handleCEOCommand = async (command) => {
+    const cmd = (command || "").trim();
+    if (!cmd || ceoThinking || orchestrating) return;
 
-    setTimeout(runStep, 400);
+    setCeoThinking(true);
+    setCeoInput("");
+    addCeoLog(`Command: ${cmd}`);
+
+    try {
+      let plan, chosen;
+
+      if (HAS_API_KEY) {
+        const raw = await callClaude(CEO_SYSTEM_PROMPT, cmd);
+        const jsonStr = raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1);
+        const parsed = JSON.parse(jsonStr);
+        plan = parsed.plan;
+        chosen = (parsed.agents || [])
+          .filter(x => SUB_AGENTS.some(s => s.id === x.id))
+          .slice(0, 4);
+      } else {
+        // Simulation fallback: pick random 3 agents
+        const shuffled = [...SUB_AGENTS].sort(() => Math.random() - 0.5).slice(0, 3);
+        plan = `(Simulasi) Menjalankan ${shuffled.length} agent untuk: ${cmd}`;
+        chosen = shuffled.map(s => ({ id: s.id, task: s.task }));
+      }
+
+      if (!chosen.length) {
+        addCeoLog("Tidak ada agent relevan ditemukan.");
+        return;
+      }
+
+      addCeoLog(plan);
+
+      // Apply CEO-assigned tasks to agents
+      setAgents(prev => prev.map(a => {
+        const match = chosen.find(c => c.id === a.id);
+        return match ? { ...a, task: match.task } : a;
+      }));
+
+      const flow = {
+        id: "ceo-" + Date.now(),
+        name: "◈ CEO Command",
+        desc: cmd.slice(0, 48),
+        chain: chosen.map(c => c.id),
+      };
+
+      await sleep(50); // let task state settle
+      runOrchestration(flow);
+    } catch (err) {
+      addCeoLog(`✗ ERROR: ${err.message}`);
+    } finally {
+      setCeoThinking(false);
+    }
   };
 
   const resetAll = () => {
+    cancelRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
     setAgents(SUB_AGENTS);
     setOrchestrating(false);
     setActiveFlow(null);
     setActiveChainStep(-1);
+    setCeoLogs([]);
   };
 
   return (
-    <div style={{
+    <div className="main-wrapper" style={{
       minHeight: "100vh",
       background: "#07070f",
       backgroundImage:
@@ -610,14 +913,44 @@ export default function AgenticDashboard() {
           from { opacity: 0; transform: translateY(8px); }
           to { opacity: 1; transform: translateY(0); }
         }
+        @keyframes slideInRight {
+          from { opacity: 0; transform: translateX(20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes slideInBottom {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes statusGlow {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #ffffff22; border-radius: 2px; }
+
+        @media (max-width: 768px) {
+          .main-wrapper { padding: 16px 16px !important; }
+          .ceo-stats { flex-direction: column !important; }
+          .agents-grid { grid-template-columns: 1fr !important; }
+          .detail-panel {
+            position: fixed !important;
+            right: 0 !important; left: 0 !important; bottom: 0 !important;
+            top: auto !important;
+            transform: none !important;
+            width: 100% !important;
+            border-radius: 18px 18px 0 0 !important;
+            max-height: 70vh !important;
+            overflow-y: auto !important;
+          }
+          .flow-buttons { flex-direction: column !important; }
+          .top-header { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
+        }
       `}</style>
 
       {/* ── TOP HEADER ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+      <div className="top-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 10px #34D399" }} />
@@ -629,6 +962,13 @@ export default function AgenticDashboard() {
           </h1>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => setShowFlowBuilder(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ⊞ CUSTOM FLOW
+          </button>
           {(orchestrating || activeFlow) && (
             <button onClick={resetAll} style={{
               background: "#ef444418",
@@ -657,12 +997,24 @@ export default function AgenticDashboard() {
         </div>
       </div>
 
+      {/* ── API KEY WARNING ── */}
+      {!import.meta.env.VITE_ANTHROPIC_API_KEY && (
+        <div style={{ marginBottom: 16, padding: '10px 14px', background: '#ef444412', border: '1px solid #ef444433', borderRadius: 10, color: '#ef4444', fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
+          ⚠ VITE_ANTHROPIC_API_KEY not set — CEO Agent running in simulation mode
+        </div>
+      )}
+
       {/* ── CEO LAYER ── */}
       <CEOPanel
         agents={agents}
         onOrchestrate={runOrchestration}
         orchestrating={orchestrating}
         activeFlow={activeFlow}
+        ceoInput={ceoInput}
+        setCeoInput={setCeoInput}
+        ceoThinking={ceoThinking}
+        onCEOCommand={handleCEOCommand}
+        ceoLogs={ceoLogs}
       />
 
       {/* ── CONNECTION INDICATOR ── */}
@@ -677,6 +1029,7 @@ export default function AgenticDashboard() {
           alignItems: "center",
           gap: 8,
           flexWrap: "wrap",
+          animation: "fadeSlideIn 0.3s ease",
         }}>
           <span style={{ color: "#F0C04088", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>FLOW:</span>
           {activeFlow.chain.map((agentId, i) => {
@@ -711,7 +1064,7 @@ export default function AgenticDashboard() {
         <div style={{ color: "#ffffff33", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 2, marginBottom: 14 }}>
           SUB-AGENTS — {agents.length} TOTAL
         </div>
-        <div style={{
+        <div className="agents-grid" style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
           gap: 14,
@@ -743,6 +1096,16 @@ export default function AgenticDashboard() {
         <AgentDetailPanel
           agent={agents.find(a => a.id === selectedAgent.id)}
           onClose={() => setSelectedAgent(null)}
+        />
+      )}
+
+      {/* ── CUSTOM FLOW BUILDER ── */}
+      {showFlowBuilder && (
+        <FlowBuilder
+          customFlow={customFlow}
+          setCustomFlow={setCustomFlow}
+          onRun={runOrchestration}
+          onClose={() => setShowFlowBuilder(false)}
         />
       )}
     </div>
