@@ -1,20 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { callClaude } from "./lib/claude";
+import { AGENTS } from "./config/agents";
 
 const HAS_API_KEY = !!import.meta.env.VITE_ANTHROPIC_API_KEY;
 
-const AGENT_SYSTEM_PROMPTS = {
-  webdev: "You are a website developer agent. Audit the given task and return 4-5 actionable bullet points with findings and recommendations. Be specific and technical.",
-  market: "You are a market research agent. Analyze the given task and return 4-5 bullet points with market insights, trends, and competitor findings.",
-  leadgen: "You are a lead generation agent. For the given task, return 4-5 bullet points describing lead sources found, qualification criteria, and estimated numbers.",
-  email: "You are an email campaign agent. For the given task, return 4-5 bullet points with email strategy, subject line ideas, and send schedule.",
-  social: "You are a social media agent. For the given task, return 4-5 bullet points with platform strategy, content ideas, and posting schedule.",
-  content: "You are a content creation agent. For the given task, return 4-5 bullet points with content formats, key messages, and production plan.",
-  scheduler: "You are a content scheduler agent. For the given task, return 4-5 bullet points with scheduling strategy, optimal times, and platform assignments.",
-};
-
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
-You have 7 sub-agents: Website Dev (webdev), Market Research (market), Lead Gen (leadgen), Email Campaign (email), Social Media (social), Content Creation (content), Content Scheduler (scheduler).
+You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
 
 Given the user's command, respond in JSON only:
 {
@@ -38,85 +29,8 @@ const CEO_AGENT = {
   icon: "◈",
 };
 
-const SUB_AGENTS = [
-  {
-    id: "webdev",
-    name: "Website Dev",
-    icon: "⌥",
-    color: "#38BDF8",
-    status: "idle",
-    task: "Landing page audit",
-    progress: 0,
-    desc: "Build, deploy & maintain web assets",
-    logs: ["Standby — menunggu perintah CEO"],
-  },
-  {
-    id: "market",
-    name: "Market Research",
-    icon: "◎",
-    color: "#A78BFA",
-    status: "idle",
-    task: "Competitor analysis",
-    progress: 0,
-    desc: "Analisis pasar, tren, kompetitor",
-    logs: ["Standby — menunggu perintah CEO"],
-  },
-  {
-    id: "leadgen",
-    name: "Lead Gen",
-    icon: "⊕",
-    color: "#34D399",
-    status: "idle",
-    task: "Scrape 500 leads",
-    progress: 0,
-    desc: "Temukan & kualifikasi prospek baru",
-    logs: ["Standby — menunggu perintah CEO"],
-  },
-  {
-    id: "email",
-    name: "Email Campaign",
-    icon: "✉",
-    color: "#FB923C",
-    status: "idle",
-    task: "Newsletter Q2 draft",
-    progress: 0,
-    desc: "Tulis & kirim campaign email",
-    logs: ["Standby — menunggu perintah CEO"],
-  },
-  {
-    id: "social",
-    name: "Social Media",
-    icon: "⬡",
-    color: "#F472B6",
-    status: "idle",
-    task: "IG + TikTok schedule",
-    progress: 0,
-    desc: "Kelola semua platform sosial",
-    logs: ["Standby — menunggu perintah CEO"],
-  },
-  {
-    id: "content",
-    name: "Content Creation",
-    icon: "✦",
-    color: "#FBBF24",
-    status: "idle",
-    task: "UGC script batch",
-    progress: 0,
-    desc: "Buat konten: script, copy, visual brief",
-    logs: ["Standby — menunggu perintah CEO"],
-  },
-  {
-    id: "scheduler",
-    name: "Content Scheduler",
-    icon: "⏱",
-    color: "#6EE7B7",
-    status: "idle",
-    task: "Queue 30 posts",
-    progress: 0,
-    desc: "Jadwalkan & distribusi konten",
-    logs: ["Standby — menunggu perintah CEO"],
-  },
-];
+const makeInitialAgents = () =>
+  AGENTS.map(a => ({ ...a, status: "idle", progress: 0, task: a.defaultTask, logs: ["Standby — menunggu perintah CEO"] }));
 
 const ORCHESTRA_FLOWS = [
   {
@@ -488,7 +402,7 @@ function AgentDetailPanel({ agent, onClose }) {
       <div>
         <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 1, marginBottom: 8 }}>CAPABILITIES</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {getCapabilities(agent.id).map(cap => (
+          {(AGENTS.find(a => a.id === agent.id)?.capabilities || []).map(cap => (
             <div key={cap} style={{ padding: "3px 9px", borderRadius: 20, background: `${agent.color}12`, border: `1px solid ${agent.color}33`, color: agent.color + "cc", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
               {cap}
             </div>
@@ -497,19 +411,6 @@ function AgentDetailPanel({ agent, onClose }) {
       </div>
     </div>
   );
-}
-
-function getCapabilities(id) {
-  const map = {
-    webdev: ["HTML/CSS", "React", "Deploy", "SEO audit", "Performance"],
-    market: ["Competitor scan", "Trend analysis", "SWOT", "Pricing research"],
-    leadgen: ["Scraping", "Qualify leads", "CRM sync", "Email verify"],
-    email: ["Draft copy", "A/B test", "Send schedule", "Analytics"],
-    social: ["Post draft", "Hashtag research", "Engagement", "DM auto"],
-    content: ["UGC script", "Caption", "Video brief", "Blog post"],
-    scheduler: ["Queue posts", "Platform sync", "Calendar view", "Auto-post"],
-  };
-  return map[id] || [];
 }
 
 // ─── ORCHESTRATION CONNECTION LINES ─────────────────────────────────────────
@@ -528,7 +429,7 @@ function ConnectionLines({ activeChain, agents }) {
 // ─── CUSTOM FLOW BUILDER ─────────────────────────────────────────────────────
 
 function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
-  const allAgentIds = ["webdev", "market", "leadgen", "email", "social", "content", "scheduler"];
+  const allAgentIds = AGENTS.map(a => a.id);
 
   const toggleAgent = (id) => {
     setCustomFlow(prev => ({
@@ -603,7 +504,7 @@ function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {allAgentIds.map(id => {
-              const meta = SUB_AGENTS.find(a => a.id === id);
+              const meta = AGENTS.find(a => a.id === id);
               const selected = customFlow.chain.includes(id);
               return (
                 <button key={id} onClick={() => toggleAgent(id)} style={{
@@ -632,7 +533,7 @@ function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {customFlow.chain.map((id, i) => {
-                const meta = SUB_AGENTS.find(a => a.id === id);
+                const meta = AGENTS.find(a => a.id === id);
                 return (
                   <div key={id} style={{
                     display: "flex", alignItems: "center", gap: 10,
@@ -676,7 +577,7 @@ function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 
 export default function AgenticDashboard() {
-  const [agents, setAgents] = useState(SUB_AGENTS);
+  const [agents, setAgents] = useState(makeInitialAgents);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [orchestrating, setOrchestrating] = useState(false);
   const [activeFlow, setActiveFlow] = useState(null);
@@ -694,40 +595,9 @@ export default function AgenticDashboard() {
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const LOG_MESSAGES = {
-    webdev: [
-      "Scanning sitemap...", "Checking page speed...", "Analyzing CLS/LCP metrics...",
-      "Generating improvement report...", "Landing page audit selesai ✓"
-    ],
-    market: [
-      "Pulling competitor data...", "Scanning Google Trends...", "Analyzing pricing gaps...",
-      "Building SWOT matrix...", "Market research selesai ✓"
-    ],
-    leadgen: [
-      "Scraping target URLs...", "Validating email addresses...", "Scoring lead quality...",
-      "Syncing ke CRM...", "500 leads berhasil dikualifikasi ✓"
-    ],
-    email: [
-      "Drafting email copy...", "A/B variant dibuat...", "Optimizing subject lines...",
-      "Scheduling send time...", "Campaign email siap dikirim ✓"
-    ],
-    social: [
-      "Researching trending hashtags...", "Drafting post captions...", "Creating posting schedule...",
-      "Syncing ke semua platform...", "Social media plan siap ✓"
-    ],
-    content: [
-      "Analyzing top-performing content...", "Writing UGC scripts...", "Creating visual briefs...",
-      "Batch konten finalized...", "Content creation selesai ✓"
-    ],
-    scheduler: [
-      "Loading content queue...", "Optimizing post timing...", "Assigning platforms...",
-      "Calendar updated...", "30 posts terjadwal ✓"
-    ],
-  };
-
   // Simulation fallback for one agent step (interval-based, returns a promise)
   const runFakeStep = (agentId) => new Promise((resolve) => {
-    const msgs = LOG_MESSAGES[agentId] || ["Processing...", "Done ✓"];
+    const msgs = AGENTS.find(a => a.id === agentId)?.logMessages || ["Processing...", "Done ✓"];
     let msgIndex = 0;
 
     const progressInterval = setInterval(() => {
@@ -757,7 +627,10 @@ export default function AgenticDashboard() {
 
   // Real Claude-backed step — streams response lines as logs
   const runClaudeStep = async (agentId, task) => {
-    const text = await callClaude(AGENT_SYSTEM_PROMPTS[agentId], task || "Lakukan tugas standar.");
+    const text = await callClaude(
+      AGENTS.find(a => a.id === agentId)?.systemPrompt || "You are a helpful agent. Return 4-5 bullet points.",
+      task || "Lakukan tugas standar."
+    );
     const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
     const total = lines.length || 1;
     for (let i = 0; i < lines.length; i++) {
@@ -839,17 +712,30 @@ export default function AgenticDashboard() {
 
       if (HAS_API_KEY) {
         const raw = await callClaude(CEO_SYSTEM_PROMPT, cmd);
-        const jsonStr = raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1);
-        const parsed = JSON.parse(jsonStr);
+        let parsed;
+        try {
+          // Strip markdown fences if present
+          const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+          const jsonStr = cleaned.slice(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1);
+          parsed = JSON.parse(jsonStr);
+          if (!parsed.plan || !Array.isArray(parsed.agents)) throw new Error("invalid shape");
+        } catch (e) {
+          // Fallback: pick 3 random agents
+          const fallbackIds = AGENTS.map(a => a.id).sort(() => Math.random() - 0.5).slice(0, 3);
+          parsed = {
+            plan: command,
+            agents: fallbackIds.map(id => ({ id, task: command })),
+          };
+        }
         plan = parsed.plan;
         chosen = (parsed.agents || [])
-          .filter(x => SUB_AGENTS.some(s => s.id === x.id))
+          .filter(x => AGENTS.some(s => s.id === x.id))
           .slice(0, 4);
       } else {
         // Simulation fallback: pick random 3 agents
-        const shuffled = [...SUB_AGENTS].sort(() => Math.random() - 0.5).slice(0, 3);
+        const shuffled = [...AGENTS].sort(() => Math.random() - 0.5).slice(0, 3);
         plan = `(Simulasi) Menjalankan ${shuffled.length} agent untuk: ${cmd}`;
-        chosen = shuffled.map(s => ({ id: s.id, task: s.task }));
+        chosen = shuffled.map(s => ({ id: s.id, task: s.defaultTask }));
       }
 
       if (!chosen.length) {
@@ -884,7 +770,7 @@ export default function AgenticDashboard() {
   const resetAll = () => {
     cancelRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
-    setAgents(SUB_AGENTS);
+    setAgents(makeInitialAgents());
     setOrchestrating(false);
     setActiveFlow(null);
     setActiveChainStep(-1);
@@ -1034,7 +920,7 @@ export default function AgenticDashboard() {
           <span style={{ color: "#F0C04088", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>FLOW:</span>
           {activeFlow.chain.map((agentId, i) => {
             const a = agents.find(x => x.id === agentId);
-            const meta = SUB_AGENTS.find(x => x.id === agentId);
+            const meta = AGENTS.find(x => x.id === agentId);
             const isDone = a?.status === "done";
             const isRunning = a?.status === "running";
             return (

@@ -1,28 +1,23 @@
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
+// In production (Vercel), always use the /api/claude proxy (key stays server-side).
+// In local dev, if VITE_ANTHROPIC_API_KEY is set, the proxy path is also enabled.
+// HAS_API_KEY signals whether we expect the proxy to work.
+
+export const HAS_API_KEY = Boolean(
+  import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.PROD
+);
 
 export async function callClaude(system, userMsg) {
-  if (!API_KEY) throw new Error('VITE_ANTHROPIC_API_KEY not set');
-
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 600,
-      system,
-      messages: [{ role: 'user', content: userMsg }],
-    }),
+  const response = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ system, userMsg }),
   });
 
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error?.message || `HTTP ${resp.status}`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${response.status}`);
   }
 
-  const data = await resp.json();
-  return data.content[0].text;
+  const data = await response.json();
+  return data.text;
 }
