@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { callClaude } from "./lib/claude";
 import { AGENTS } from "./config/agents";
+import OutputPanel from "./components/OutputPanel";
+import AddAgentModal from "./components/AddAgentModal";
+import HistoryPanel, { useHistory } from "./components/HistoryPanel";
+import CEOChat from "./components/CEOChat";
+import { useCustomAgents } from "./hooks/useCustomAgents";
+import { exportJSON, exportPDF } from "./lib/export";
 
 const HAS_API_KEY = !!import.meta.env.VITE_ANTHROPIC_API_KEY;
 
@@ -332,7 +338,7 @@ function CEOPanel({ agents, onOrchestrate, orchestrating, activeFlow, ceoInput, 
 
 // ─── AGENT DETAIL PANEL ──────────────────────────────────────────────────────
 
-function AgentDetailPanel({ agent, onClose }) {
+function AgentDetailPanel({ agent, onClose, allAgents }) {
   if (!agent) return null;
   return (
     <div className="detail-panel" style={{
@@ -402,7 +408,7 @@ function AgentDetailPanel({ agent, onClose }) {
       <div>
         <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 1, marginBottom: 8 }}>CAPABILITIES</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {(AGENTS.find(a => a.id === agent.id)?.capabilities || []).map(cap => (
+          {(allAgents.find(a => a.id === agent.id)?.capabilities || []).map(cap => (
             <div key={cap} style={{ padding: "3px 9px", borderRadius: 20, background: `${agent.color}12`, border: `1px solid ${agent.color}33`, color: agent.color + "cc", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
               {cap}
             </div>
@@ -428,8 +434,8 @@ function ConnectionLines({ activeChain, agents }) {
 
 // ─── CUSTOM FLOW BUILDER ─────────────────────────────────────────────────────
 
-function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
-  const allAgentIds = AGENTS.map(a => a.id);
+function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose, allAgents }) {
+  const allAgentIds = allAgents.map(a => a.id);
 
   const toggleAgent = (id) => {
     setCustomFlow(prev => ({
@@ -504,7 +510,7 @@ function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {allAgentIds.map(id => {
-              const meta = AGENTS.find(a => a.id === id);
+              const meta = allAgents.find(a => a.id === id);
               const selected = customFlow.chain.includes(id);
               return (
                 <button key={id} onClick={() => toggleAgent(id)} style={{
@@ -533,7 +539,7 @@ function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {customFlow.chain.map((id, i) => {
-                const meta = AGENTS.find(a => a.id === id);
+                const meta = allAgents.find(a => a.id === id);
                 return (
                   <div key={id} style={{
                     display: "flex", alignItems: "center", gap: 10,
@@ -577,7 +583,14 @@ function FlowBuilder({ customFlow, setCustomFlow, onRun, onClose }) {
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 
 export default function AgenticDashboard() {
-  const [agents, setAgents] = useState(makeInitialAgents);
+  const { allAgents: configAgents, addAgent } = useCustomAgents();
+  const makeAgentState = () => configAgents.map(a => ({ ...a, status: "idle", progress: 0, task: a.defaultTask, logs: ["Standby — menunggu perintah CEO"] }));
+  const [agents, setAgents] = useState(() => makeAgentState());
+  const [results, setResults] = useState([]); // OutputPanel results
+  const [showOutputPanel, setShowOutputPanel] = useState(false);
+  const [showAddAgent, setShowAddAgent] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const { sessions, addSession, removeSession, clearAll: clearHistory } = useHistory();
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [orchestrating, setOrchestrating] = useState(false);
   const [activeFlow, setActiveFlow] = useState(null);
@@ -682,6 +695,28 @@ export default function AgenticDashboard() {
         setAgents(prev => prev.map(a =>
           a.id === agentId ? { ...a, status: "done", progress: 100 } : a
         ));
+
+        // Capture output: get the last log lines (excluding control lines)
+        const agentMeta = configAgents.find(x => x.id === agentId);
+        setAgents(prev => {
+          const agentState = prev.find(a => a.id === agentId);
+          const output = (agentState?.logs || [])
+            .filter(l => !l.startsWith("▶") && !l.startsWith("Queued") && !l.startsWith("Standby"))
+            .join("\n");
+          if (output && agentMeta) {
+            setResults(r => [...r, {
+              id: agentId + "-" + Date.now(),
+              agentId,
+              agentName: agentMeta.name,
+              agentColor: agentMeta.color,
+              agentIcon: agentMeta.icon,
+              task: agentState?.task || agentMeta.defaultTask,
+              output,
+              timestamp: Date.now(),
+            }]);
+          }
+          return prev; // don't modify agents here
+        });
       } catch (err) {
         setAgents(prev => prev.map(a =>
           a.id === agentId
@@ -697,6 +732,18 @@ export default function AgenticDashboard() {
     setOrchestrating(false);
     setActiveChainStep(-1);
     if (!cancelRef.current) setActiveFlow(prev => prev ? { ...prev, done: true } : prev);
+
+    // Save session to history
+    addSession({
+      flowName: flow.name,
+      startedAt: Date.now() - (flow.chain.length * 3000), // estimate
+      completedAt: Date.now(),
+      agentCount: flow.chain.length,
+      results: flow.chain.map(id => {
+        const meta = configAgents.find(a => a.id === id);
+        return { agentId: id, agentName: meta?.name || id, output: "", task: meta?.defaultTask || "" };
+      }),
+    });
   };
 
   const handleCEOCommand = async (command) => {
@@ -767,10 +814,22 @@ export default function AgenticDashboard() {
     }
   };
 
+  const handleAddAgent = (agentObj) => {
+    addAgent(agentObj); // saves to localStorage via useCustomAgents
+    setAgents(prev => [...prev, {
+      ...agentObj,
+      status: "idle",
+      progress: 0,
+      task: agentObj.defaultTask,
+      logs: ["Standby — menunggu perintah CEO"],
+    }]);
+    setShowAddAgent(false);
+  };
+
   const resetAll = () => {
     cancelRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
-    setAgents(makeInitialAgents());
+    setAgents(configAgents.map(a => ({ ...a, status: "idle", progress: 0, task: a.defaultTask, logs: ["Standby — menunggu perintah CEO"] })));
     setOrchestrating(false);
     setActiveFlow(null);
     setActiveChainStep(-1);
@@ -848,6 +907,31 @@ export default function AgenticDashboard() {
           </h1>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {results.length > 0 && (
+            <button onClick={() => setShowOutputPanel(p => !p)} style={{
+              background: showOutputPanel ? "#38BDF822" : "#ffffff08",
+              border: `1px solid ${showOutputPanel ? "#38BDF844" : "#ffffff15"}`,
+              color: showOutputPanel ? "#38BDF8" : "#ffffffcc",
+              padding: "7px 14px", borderRadius: 9,
+              cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+            }}>
+              📋 OUTPUT ({results.length})
+            </button>
+          )}
+          <button onClick={() => setShowHistory(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ◷ HISTORY {sessions.length > 0 ? `(${sessions.length})` : ""}
+          </button>
+          <button onClick={() => setShowAddAgent(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ⊕ ADD AGENT
+          </button>
           <button onClick={() => setShowFlowBuilder(true)} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
             color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
@@ -902,6 +986,17 @@ export default function AgenticDashboard() {
         onCEOCommand={handleCEOCommand}
         ceoLogs={ceoLogs}
       />
+
+      {/* ── CEO CHAT ── */}
+      <div style={{ marginBottom: 16, marginTop: -8 }}>
+        <CEOChat
+          onOrchestrate={runOrchestration}
+          orchestrating={orchestrating}
+          ceoLogs={ceoLogs}
+          hasApiKey={HAS_API_KEY}
+          onCEOCommand={handleCEOCommand}
+        />
+      </div>
 
       {/* ── CONNECTION INDICATOR ── */}
       {activeFlow && (
@@ -982,6 +1077,7 @@ export default function AgenticDashboard() {
         <AgentDetailPanel
           agent={agents.find(a => a.id === selectedAgent.id)}
           onClose={() => setSelectedAgent(null)}
+          allAgents={configAgents}
         />
       )}
 
@@ -992,6 +1088,38 @@ export default function AgenticDashboard() {
           setCustomFlow={setCustomFlow}
           onRun={runOrchestration}
           onClose={() => setShowFlowBuilder(false)}
+          allAgents={configAgents}
+        />
+      )}
+
+      {/* ── OUTPUT PANEL ── */}
+      {showOutputPanel && (
+        <OutputPanel
+          results={results}
+          onClear={() => setResults([])}
+          onExport={(fmt) => fmt === 'json' ? exportJSON(results) : exportPDF(results)}
+        />
+      )}
+
+      {/* ── ADD AGENT MODAL ── */}
+      {showAddAgent && (
+        <AddAgentModal
+          onAdd={handleAddAgent}
+          onClose={() => setShowAddAgent(false)}
+        />
+      )}
+
+      {/* ── HISTORY PANEL ── */}
+      {showHistory && (
+        <HistoryPanel
+          sessions={sessions}
+          onReplay={(session) => {
+            setShowHistory(false);
+            runOrchestration({ id: "replay-" + session.id, name: "↺ " + session.flowName, chain: session.results.map(r => r.agentId) });
+          }}
+          onClear={clearHistory}
+          onClose={() => setShowHistory(false)}
+          onDelete={removeSession}
         />
       )}
     </div>
