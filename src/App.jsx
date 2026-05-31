@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { callClaude } from "./lib/claude";
 import { AGENTS } from "./config/agents";
 import OutputPanel from "./components/OutputPanel";
@@ -7,6 +7,14 @@ import HistoryPanel, { useHistory } from "./components/HistoryPanel";
 import CEOChat from "./components/CEOChat";
 import { useCustomAgents } from "./hooks/useCustomAgents";
 import { exportJSON, exportPDF } from "./lib/export";
+import AnalyticsPanel from "./components/AnalyticsPanel";
+import TemplatesModal from "./components/TemplatesModal";
+import SchedulerModal from "./components/SchedulerModal";
+import WebhookModal from "./components/WebhookModal";
+import { useAnalytics } from "./hooks/useAnalytics";
+import { useScheduler } from "./hooks/useScheduler";
+import { useWebhook } from "./hooks/useWebhook";
+import { callClaudeStream } from "./lib/claude";
 
 const HAS_API_KEY = !!import.meta.env.VITE_ANTHROPIC_API_KEY;
 
@@ -603,6 +611,25 @@ export default function AgenticDashboard() {
   const timerRef = useRef(null);
   const cancelRef = useRef(false);
 
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showScheduler, setShowScheduler] = useState(false);
+  const [showWebhook, setShowWebhook] = useState(false);
+
+  const { stats, recordRun, resetStats } = useAnalytics();
+  const { webhooks, addWebhook, toggleWebhook, removeWebhook, fireWebhooks } = useWebhook();
+
+  // Scheduler: when a schedule fires, run the matching flow.
+  // runOrchestration is defined later in the component; use a ref to avoid stale closures.
+  const runOrchestrationRef = useRef(null);
+  const handleScheduleTrigger = useCallback((schedule) => {
+    const flow = [...ORCHESTRA_FLOWS, { id: "custom", name: schedule.flowName, chain: schedule.chain }]
+      .find(f => f.id === schedule.flowId) || { id: "scheduled", name: schedule.flowName, chain: schedule.chain || [] };
+    if (flow.chain.length > 0) runOrchestrationRef.current?.(flow);
+  }, []);
+
+  const { schedules, addSchedule, toggleSchedule, removeSchedule } = useScheduler(handleScheduleTrigger);
+
   const addCeoLog = (text) =>
     setCeoLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString() }]);
 
@@ -638,26 +665,47 @@ export default function AgenticDashboard() {
     timerRef.current = progressInterval;
   });
 
-  // Real Claude-backed step — streams response lines as logs
+  // Real Claude-backed step — streams response tokens as logs
   const runClaudeStep = async (agentId, task) => {
-    const text = await callClaude(
-      AGENTS.find(a => a.id === agentId)?.systemPrompt || "You are a helpful agent. Return 4-5 bullet points.",
-      task || "Lakukan tugas standar."
+    let fullText = "";
+    let lineBuffer = "";
+
+    await callClaudeStream(
+      configAgents.find(a => a.id === agentId)?.systemPrompt || "You are a helpful agent. Return 4-5 bullet points.",
+      task || "Lakukan tugas standar.",
+      (token) => {
+        if (cancelRef.current) return;
+        lineBuffer += token;
+        fullText += token;
+        // When we hit a newline, flush as a log line
+        if (lineBuffer.includes("\n")) {
+          const parts = lineBuffer.split("\n");
+          lineBuffer = parts.pop(); // keep incomplete line
+          parts.filter(Boolean).forEach(line => {
+            setAgents(prev => prev.map(a =>
+              a.id === agentId ? { ...a, logs: [...a.logs, line.trim()] } : a
+            ));
+          });
+          // Update progress based on text received
+          const progress = Math.min(Math.round((fullText.length / 400) * 100), 95);
+          setAgents(prev => prev.map(a =>
+            a.id === agentId ? { ...a, progress } : a
+          ));
+        }
+      }
     );
-    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-    const total = lines.length || 1;
-    for (let i = 0; i < lines.length; i++) {
-      if (cancelRef.current) return;
-      const progress = Math.min(Math.round(((i + 1) / total) * 100), 100);
+
+    // Flush remaining buffer
+    if (lineBuffer.trim()) {
       setAgents(prev => prev.map(a =>
-        a.id === agentId ? { ...a, progress, logs: [...a.logs, lines[i]] } : a
+        a.id === agentId ? { ...a, logs: [...a.logs, lineBuffer.trim()] } : a
       ));
-      await sleep(300);
     }
   };
 
   const runOrchestration = async (flow) => {
     if (orchestrating) return;
+    const runStartTime = Date.now();
     cancelRef.current = false;
     setActiveFlow(flow);
     setOrchestrating(true);
@@ -744,7 +792,32 @@ export default function AgenticDashboard() {
         return { agentId: id, agentName: meta?.name || id, output: "", task: meta?.defaultTask || "" };
       }),
     });
+
+    // Read the latest agent snapshot (avoid stale closure) for analytics + webhooks
+    setAgents(prev => {
+      const durationMs = Date.now() - runStartTime;
+      const hadError = prev.some(a => flow.chain.includes(a.id) && a.status === "error");
+      recordRun({ flowName: flow.name, agents: flow.chain, durationMs, hadError });
+
+      const completedResults = flow.chain.map(id => {
+        const a = prev.find(x => x.id === id);
+        return {
+          agentId: id,
+          agentName: configAgents.find(x => x.id === id)?.name || id,
+          output: a?.logs?.join("\n") || "",
+          task: a?.task || "",
+        };
+      });
+      fireWebhooks({ flowName: flow.name, agentCount: flow.chain.length, results: completedResults });
+
+      return prev; // no state mutation
+    });
   };
+
+  // Keep ref in sync so scheduler triggers use the latest runOrchestration
+  useEffect(() => {
+    runOrchestrationRef.current = runOrchestration;
+  });
 
   const handleCEOCommand = async (command) => {
     const cmd = (command || "").trim();
@@ -907,6 +980,36 @@ export default function AgenticDashboard() {
           </h1>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => setShowTemplates(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ✦ TEMPLATES
+          </button>
+          <button onClick={() => setShowAnalytics(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ◎ ANALYTICS {stats.totalRuns > 0 ? `(${stats.totalRuns})` : ""}
+          </button>
+          <button onClick={() => setShowScheduler(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ⏱ SCHEDULER {schedules.filter(s=>s.enabled).length > 0 ? `(${schedules.filter(s=>s.enabled).length})` : ""}
+          </button>
+          <button onClick={() => setShowWebhook(true)} style={{
+            background: webhooks.filter(w=>w.enabled).length > 0 ? "#34D39918" : "#ffffff08",
+            border: `1px solid ${webhooks.filter(w=>w.enabled).length > 0 ? "#34D39944" : "#ffffff15"}`,
+            color: webhooks.filter(w=>w.enabled).length > 0 ? "#34D399" : "#ffffffcc",
+            padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ⬡ WEBHOOKS {webhooks.filter(w=>w.enabled).length > 0 ? `(${webhooks.filter(w=>w.enabled).length})` : ""}
+          </button>
           {results.length > 0 && (
             <button onClick={() => setShowOutputPanel(p => !p)} style={{
               background: showOutputPanel ? "#38BDF822" : "#ffffff08",
@@ -1065,7 +1168,7 @@ export default function AgenticDashboard() {
       {/* ── FOOTER ── */}
       <div style={{ marginTop: 28, display: "flex", alignItems: "center", justifyContent: "space-between", opacity: 0.35 }}>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
-          AGENTIC DASHBOARD v0.1 — POWERED BY CLAUDE API
+          AGENTIC DASHBOARD v0.3 — POWERED BY CLAUDE API
         </div>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
           {agents.filter(a => a.status === "done").length}/{agents.length} TASKS COMPLETE
@@ -1120,6 +1223,47 @@ export default function AgenticDashboard() {
           onClear={clearHistory}
           onClose={() => setShowHistory(false)}
           onDelete={removeSession}
+        />
+      )}
+
+      {/* ── ANALYTICS ── */}
+      {showAnalytics && (
+        <AnalyticsPanel
+          stats={stats}
+          onReset={resetStats}
+          onClose={() => setShowAnalytics(false)}
+        />
+      )}
+
+      {/* ── TEMPLATES ── */}
+      {showTemplates && (
+        <TemplatesModal
+          onInstall={(template) => { handleAddAgent(template); }}
+          installedIds={configAgents.map(a => a.id)}
+          onClose={() => setShowTemplates(false)}
+        />
+      )}
+
+      {/* ── SCHEDULER ── */}
+      {showScheduler && (
+        <SchedulerModal
+          schedules={schedules}
+          flows={[...ORCHESTRA_FLOWS, { id: "custom", name: "Custom Flow" }]}
+          onAdd={addSchedule}
+          onToggle={toggleSchedule}
+          onRemove={removeSchedule}
+          onClose={() => setShowScheduler(false)}
+        />
+      )}
+
+      {/* ── WEBHOOKS ── */}
+      {showWebhook && (
+        <WebhookModal
+          webhooks={webhooks}
+          onAdd={addWebhook}
+          onToggle={toggleWebhook}
+          onRemove={removeWebhook}
+          onClose={() => setShowWebhook(false)}
         />
       )}
     </div>
