@@ -15,7 +15,11 @@ export function useCustomAgents() {
 
   // Persist to localStorage on change
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(customAgents));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(customAgents));
+    } catch (e) {
+      console.warn("Storage write failed:", e);
+    }
   }, [customAgents]);
 
   // All agents: defaults first, then custom

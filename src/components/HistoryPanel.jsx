@@ -12,7 +12,11 @@ export function useHistory() {
   });
 
   useEffect(() => {
-    localStorage.setItem("deniskyla_history", JSON.stringify(sessions));
+    try {
+      localStorage.setItem("deniskyla_history", JSON.stringify(sessions));
+    } catch (e) {
+      console.warn("Storage write failed:", e);
+    }
   }, [sessions]);
 
   const addSession = (session) => {

@@ -200,13 +200,6 @@ export default function CEOChat({
         .map((m) => `${m.role === "user" ? "User" : "CEO"}: ${m.content}`)
         .join("\n");
 
-      // Interleaved messages kept available for future structured API use
-      // eslint-disable-next-line no-unused-vars
-      const contextMessages = messages.slice(-6).map((m) => ({
-        role: m.role === "user" ? "user" : "assistant",
-        content: m.content,
-      }));
-
       const fullPrompt = historyContext
         ? `Previous conversation:\n${historyContext}\n\nUser: ${text}`
         : text;
@@ -432,5 +425,3 @@ export default function CEOChat({
     </div>
   );
 }
-
-export { CEO_SYSTEM_PROMPT, QUICK_COMMANDS };

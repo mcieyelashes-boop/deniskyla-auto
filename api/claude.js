@@ -1,11 +1,34 @@
 export default async function handler(req, res) {
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "content-type");
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  // CORS guard
+  const origin = req.headers.origin || "";
+  const allowed = process.env.ALLOWED_ORIGIN || "https://deniskyla-auto.vercel.app";
+  const allowedList = [allowed, "http://localhost:5173", "http://localhost:5174"];
+  if (origin && !allowedList.includes(origin)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
 
   const { system, userMsg, stream = false } = req.body;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "API key not configured" });
 
   if (!userMsg) return res.status(400).json({ error: "userMsg is required" });
+
+  // Input validation
+  if (typeof userMsg !== "string" || userMsg.length > 8000) {
+    return res.status(400).json({ error: "userMsg too long or invalid" });
+  }
+  if (system && (typeof system !== "string" || system.length > 4000)) {
+    return res.status(400).json({ error: "system too long or invalid" });
+  }
 
   const body = {
     model: "claude-haiku-4-5-20251001",
@@ -17,21 +40,25 @@ export default async function handler(req, res) {
 
   if (!stream) {
     // Non-streaming — existing behavior
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      return res.status(resp.status).json({ error: err.error?.message || "API error" });
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        return res.status(resp.status).json({ error: err.error?.message || "API error" });
+      }
+      const data = await resp.json();
+      return res.json({ text: data.content[0].text });
+    } catch (e) {
+      return res.status(502).json({ error: "Upstream API unavailable" });
     }
-    const data = await resp.json();
-    return res.json({ text: data.content[0].text });
   }
 
   // Streaming — pipe SSE from Anthropic to client

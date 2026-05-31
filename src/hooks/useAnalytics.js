@@ -28,7 +28,11 @@ export function useAnalytics() {
   });
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+    } catch (e) {
+      console.warn("Storage write failed:", e);
+    }
   }, [stats]);
 
   const recordRun = ({ flowName, agents, durationMs, hadError }) => {

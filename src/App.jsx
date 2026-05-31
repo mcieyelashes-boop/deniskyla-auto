@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { callClaude } from "./lib/claude";
+import { callClaude, callClaudeStream, HAS_API_KEY } from "./lib/claude";
 import { AGENTS } from "./config/agents";
 import OutputPanel from "./components/OutputPanel";
 import AddAgentModal from "./components/AddAgentModal";
@@ -14,9 +14,6 @@ import WebhookModal from "./components/WebhookModal";
 import { useAnalytics } from "./hooks/useAnalytics";
 import { useScheduler } from "./hooks/useScheduler";
 import { useWebhook } from "./hooks/useWebhook";
-import { callClaudeStream } from "./lib/claude";
-
-const HAS_API_KEY = !!import.meta.env.VITE_ANTHROPIC_API_KEY;
 
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
 You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
@@ -396,7 +393,7 @@ function AgentDetailPanel({ agent, onClose, allAgents }) {
         <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 1, marginBottom: 8 }}>ACTIVITY LOG</div>
         <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
           {[...agent.logs].reverse().map((log, i) => (
-            <div key={i} style={{
+            <div key={`${i}-${log.slice(0,15)}`} style={{
               background: i === 0 ? `${agent.color}0f` : "#ffffff05",
               border: `1px solid ${i === 0 ? agent.color + "33" : "#ffffff0a"}`,
               borderRadius: 8,
@@ -423,19 +420,6 @@ function AgentDetailPanel({ agent, onClose, allAgents }) {
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── ORCHESTRATION CONNECTION LINES ─────────────────────────────────────────
-
-function ConnectionLines({ activeChain, agents }) {
-  if (!activeChain || activeChain.length === 0) return null;
-  return (
-    <div style={{
-      position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0,
-    }}>
-      {/* Simple visual indicator — real SVG lines would need DOM refs */}
     </div>
   );
 }
@@ -641,6 +625,11 @@ export default function AgenticDashboard() {
     let msgIndex = 0;
 
     const progressInterval = setInterval(() => {
+      if (cancelRef.current) {
+        clearInterval(progressInterval);
+        resolve();
+        return;
+      }
       const progressStep = Math.floor(100 / msgs.length);
       const currentProgress = Math.min((msgIndex + 1) * progressStep, 100);
 
@@ -687,7 +676,8 @@ export default function AgenticDashboard() {
             ));
           });
           // Update progress based on text received
-          const progress = Math.min(Math.round((fullText.length / 400) * 100), 95);
+          const EXPECTED_RESPONSE_CHARS = 400;
+          const progress = Math.min(Math.round((fullText.length / EXPECTED_RESPONSE_CHARS) * 100), 95);
           setAgents(prev => prev.map(a =>
             a.id === agentId ? { ...a, progress } : a
           ));
@@ -720,6 +710,8 @@ export default function AgenticDashboard() {
 
     await sleep(400);
 
+    const completedResults = [];
+
     for (let stepIndex = 0; stepIndex < flow.chain.length; stepIndex++) {
       if (cancelRef.current) break;
       const agentId = flow.chain[stepIndex];
@@ -743,6 +735,13 @@ export default function AgenticDashboard() {
         setAgents(prev => prev.map(a =>
           a.id === agentId ? { ...a, status: "done", progress: 100 } : a
         ));
+
+        completedResults.push({
+          agentId,
+          agentName: configAgents.find(a => a.id === agentId)?.name || agentId,
+          output: "",
+          task: taskForAgent,
+        });
 
         // Capture output: get the last log lines (excluding control lines)
         const agentMeta = configAgents.find(x => x.id === agentId);
@@ -793,25 +792,9 @@ export default function AgenticDashboard() {
       }),
     });
 
-    // Read the latest agent snapshot (avoid stale closure) for analytics + webhooks
-    setAgents(prev => {
-      const durationMs = Date.now() - runStartTime;
-      const hadError = prev.some(a => flow.chain.includes(a.id) && a.status === "error");
-      recordRun({ flowName: flow.name, agents: flow.chain, durationMs, hadError });
-
-      const completedResults = flow.chain.map(id => {
-        const a = prev.find(x => x.id === id);
-        return {
-          agentId: id,
-          agentName: configAgents.find(x => x.id === id)?.name || id,
-          output: a?.logs?.join("\n") || "",
-          task: a?.task || "",
-        };
-      });
-      fireWebhooks({ flowName: flow.name, agentCount: flow.chain.length, results: completedResults });
-
-      return prev; // no state mutation
-    });
+    const durationMs = Date.now() - runStartTime;
+    recordRun({ flowName: flow.name, agents: flow.chain, durationMs, hadError: cancelRef.current });
+    fireWebhooks({ flowName: flow.name, agentCount: flow.chain.length, results: completedResults });
   };
 
   // Keep ref in sync so scheduler triggers use the latest runOrchestration
@@ -888,21 +871,25 @@ export default function AgenticDashboard() {
   };
 
   const handleAddAgent = (agentObj) => {
-    addAgent(agentObj); // saves to localStorage via useCustomAgents
-    setAgents(prev => [...prev, {
-      ...agentObj,
-      status: "idle",
-      progress: 0,
-      task: agentObj.defaultTask,
-      logs: ["Standby — menunggu perintah CEO"],
-    }]);
-    setShowAddAgent(false);
+    try {
+      addAgent(agentObj); // saves to localStorage via useCustomAgents
+      setAgents(prev => [...prev, {
+        ...agentObj,
+        status: "idle",
+        progress: 0,
+        task: agentObj.defaultTask,
+        logs: ["Standby — menunggu perintah CEO"],
+      }]);
+      setShowAddAgent(false);
+    } catch (e) {
+      alert(e.message);
+    }
   };
 
   const resetAll = () => {
     cancelRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
-    setAgents(configAgents.map(a => ({ ...a, status: "idle", progress: 0, task: a.defaultTask, logs: ["Standby — menunggu perintah CEO"] })));
+    setAgents(makeAgentState());
     setOrchestrating(false);
     setActiveFlow(null);
     setActiveChainStep(-1);
@@ -1071,9 +1058,9 @@ export default function AgenticDashboard() {
       </div>
 
       {/* ── API KEY WARNING ── */}
-      {!import.meta.env.VITE_ANTHROPIC_API_KEY && (
+      {!HAS_API_KEY && (
         <div style={{ marginBottom: 16, padding: '10px 14px', background: '#ef444412', border: '1px solid #ef444433', borderRadius: 10, color: '#ef4444', fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
-          ⚠ VITE_ANTHROPIC_API_KEY not set — CEO Agent running in simulation mode
+          ⚠ VITE_HAS_API_KEY not set — CEO Agent running in simulation mode
         </div>
       )}
 
@@ -1209,6 +1196,7 @@ export default function AgenticDashboard() {
         <AddAgentModal
           onAdd={handleAddAgent}
           onClose={() => setShowAddAgent(false)}
+          existingIds={configAgents.map(a => a.id)}
         />
       )}
 

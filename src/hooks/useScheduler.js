@@ -8,7 +8,11 @@ export function useScheduler(onTrigger) {
   });
 
   useEffect(() => {
-    localStorage.setItem("deniskyla_schedules", JSON.stringify(schedules));
+    try {
+      localStorage.setItem("deniskyla_schedules", JSON.stringify(schedules));
+    } catch (e) {
+      console.warn("Storage write failed:", e);
+    }
   }, [schedules]);
 
   // Check for due schedules every minute
@@ -24,7 +28,7 @@ export function useScheduler(onTrigger) {
         return { ...s, lastRun: now, nextRun: next };
       }));
     };
-    check(); // check immediately on mount
+    // Don't check immediately on mount — prevents stale schedules firing on app load
     const interval = setInterval(check, 60000);
     return () => clearInterval(interval);
   }, [onTrigger]);

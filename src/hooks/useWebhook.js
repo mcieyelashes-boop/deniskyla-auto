@@ -7,7 +7,11 @@ export function useWebhook() {
   });
 
   useEffect(() => {
-    localStorage.setItem("deniskyla_webhooks", JSON.stringify(webhooks));
+    try {
+      localStorage.setItem("deniskyla_webhooks", JSON.stringify(webhooks));
+    } catch (e) {
+      console.warn("Storage write failed:", e);
+    }
   }, [webhooks]);
 
   const addWebhook = (webhook) => {
@@ -24,6 +28,7 @@ export function useWebhook() {
   // Fire all enabled webhooks after a flow completes
   const fireWebhooks = async (payload) => {
     const enabled = webhooks.filter(w => w.enabled);
+    const errors = [];
     for (const wh of enabled) {
       try {
         await fetch(wh.url, {
@@ -32,14 +37,16 @@ export function useWebhook() {
           body: JSON.stringify({
             event: "flow_completed",
             timestamp: Date.now(),
-            flowName: payload.flowName,
-            agentCount: payload.agentCount,
-            results: payload.results,
+            ...payload,
             webhook_id: wh.id,
           }),
         });
-      } catch {}
+      } catch (e) {
+        errors.push({ id: wh.id, name: wh.name, error: e.message });
+        console.warn(`Webhook failed [${wh.name}]:`, e.message);
+      }
     }
+    return errors;
   };
 
   return { webhooks, addWebhook, toggleWebhook, removeWebhook, fireWebhooks };

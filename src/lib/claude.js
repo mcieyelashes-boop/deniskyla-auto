@@ -2,12 +2,11 @@
 // In local dev, if VITE_ANTHROPIC_API_KEY is set, the proxy path is also enabled.
 // HAS_API_KEY signals whether we expect the proxy to work.
 
-export const HAS_API_KEY = Boolean(
-  import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.PROD
-);
+// Never put the real API key in VITE_ vars — use VITE_HAS_API_KEY=true as a boolean flag only
+export const HAS_API_KEY = import.meta.env.VITE_HAS_API_KEY === "true" || import.meta.env.PROD;
 
-const IS_PROD = import.meta.env.PROD;
-const API_ENDPOINT = IS_PROD ? "/api/claude" : "/api/claude";
+// Always use /api/claude proxy (key stays server-side)
+const API_ENDPOINT = "/api/claude";
 
 // Non-streaming call (used for CEO orchestration — needs full JSON response)
 export async function callClaude(system, userMsg) {

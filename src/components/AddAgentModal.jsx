@@ -45,7 +45,7 @@ const INPUT_BASE = {
   transition: "border-color 0.15s ease",
 };
 
-export default function AddAgentModal({ onAdd, onClose }) {
+export default function AddAgentModal({ onAdd, onClose, existingIds = [] }) {
   const [name, setName] = useState("");
   const [idEdited, setIdEdited] = useState(false);
   const [id, setId] = useState("");
@@ -69,14 +69,14 @@ export default function AddAgentModal({ onAdd, onClose }) {
     [capabilitiesRaw]
   );
 
-  const existingIds = useMemo(() => AGENTS.map((a) => a.id), []);
+  const allExistingIds = useMemo(() => [...AGENTS.map((a) => a.id), ...existingIds], [existingIds]);
 
   const errors = useMemo(() => {
     const e = {};
     if (!name.trim()) e.name = "Name is required";
     if (!effectiveId) e.id = "ID is required";
     else if (/\s/.test(effectiveId)) e.id = "ID cannot contain spaces";
-    else if (existingIds.includes(effectiveId))
+    else if (allExistingIds.includes(effectiveId))
       e.id = `ID "${effectiveId}" already exists`;
     if (!systemPrompt.trim()) e.systemPrompt = "System prompt is required";
     else if (systemPrompt.trim().length < 20)

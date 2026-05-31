@@ -67,7 +67,10 @@ export function exportPDF(results) {
     </html>
   `;
   const win = window.open("", "_blank");
-  if (!win) return;
+  if (!win) {
+    alert("Please allow popups for this site to export PDF.");
+    return;
+  }
   win.document.write(html);
   win.document.close();
   win.print();

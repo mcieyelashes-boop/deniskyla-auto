@@ -9,9 +9,12 @@ export default function OutputPanel({ results = [], onClear, onExport }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const copy = (id, text) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 1500);
+      })
+      .catch(() => console.warn("Clipboard access denied"));
   };
 
   const relativeTime = (ts) => {
