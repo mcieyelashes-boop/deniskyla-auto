@@ -460,7 +460,6 @@ export default function AddAgentModal({ onAdd, onClose, existingIds = [] }) {
             width: "100%",
             padding: "14px",
             borderRadius: 12,
-            border: "none",
             fontFamily: FONT_HEAD,
             fontSize: 15,
             fontWeight: 700,

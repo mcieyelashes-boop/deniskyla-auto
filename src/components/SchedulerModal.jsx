@@ -46,7 +46,7 @@ function fmtDate(ts) {
   });
 }
 
-export default function SchedulerModal({ schedules, flows, onAdd, onToggle, onRemove, onClose }) {
+export default function SchedulerModal({ schedules, flows, onAdd, onToggle, onRemove, onTriggerNow, cronResults = [], onClose }) {
   const [flowId, setFlowId] = useState(flows[0]?.id || "");
   const [interval, setInterval] = useState("daily");
   const [time, setTime] = useState("09:00");
@@ -334,6 +334,31 @@ export default function SchedulerModal({ schedules, flows, onAdd, onToggle, onRe
                   />
                 </button>
 
+                {/* Run now */}
+                {onTriggerNow && (
+                  <button
+                    onClick={() => onTriggerNow(s)}
+                    title="Trigger this schedule now"
+                    style={{
+                      background: GOLD + "1a",
+                      border: "1px solid " + GOLD + "44",
+                      borderRadius: 8,
+                      color: GOLD,
+                      height: 28,
+                      padding: "0 10px",
+                      fontSize: 10,
+                      letterSpacing: 0.5,
+                      cursor: "pointer",
+                      lineHeight: 1,
+                      flexShrink: 0,
+                      fontFamily: FONT_MONO,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ▶ RUN NOW
+                  </button>
+                )}
+
                 {/* Delete */}
                 <button
                   onClick={() => onRemove(s.id)}
@@ -355,6 +380,40 @@ export default function SchedulerModal({ schedules, flows, onAdd, onToggle, onRe
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Server cron results */}
+        {cronResults.length > 0 && (
+          <div style={{ marginTop: 22 }}>
+            <label style={SECTION_LABEL}>Recent Cron Runs (server)</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {cronResults.slice(0, 5).map((r, i) => (
+                <div
+                  key={r.id || i}
+                  style={{
+                    background: "#07070f",
+                    border: "1px solid #ffffff10",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontFamily: FONT_MONO,
+                    fontSize: 10,
+                    color: "#ffffff88",
+                  }}
+                >
+                  <span style={{ color: r.error ? "#F87171" : "#34D399" }}>
+                    {r.error ? "✕" : "✓"}
+                  </span>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {r.flowName || r.scheduleId || "run"}
+                  </span>
+                  <span style={{ color: "#ffffff44", flexShrink: 0 }}>{fmtDate(r.ranAt || r.timestamp)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

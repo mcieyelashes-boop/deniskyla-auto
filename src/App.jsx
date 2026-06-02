@@ -11,9 +11,16 @@ import AnalyticsPanel from "./components/AnalyticsPanel";
 import TemplatesModal from "./components/TemplatesModal";
 import SchedulerModal from "./components/SchedulerModal";
 import WebhookModal from "./components/WebhookModal";
+import IntegrationsModal from "./components/IntegrationsModal";
+import OnboardingWizard, { useOnboarding } from "./components/OnboardingWizard";
+import WorkspaceSwitcher from "./components/WorkspaceSwitcher";
 import { useAnalytics } from "./hooks/useAnalytics";
 import { useScheduler } from "./hooks/useScheduler";
 import { useWebhook } from "./hooks/useWebhook";
+import { useIntegrations } from "./hooks/useIntegrations";
+import { useWorkspace } from "./hooks/useWorkspace";
+import { useCronScheduler } from "./hooks/useCronScheduler";
+import { buildChainedPrompt, extractChainContext } from "./lib/agentChain";
 
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
 You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
@@ -599,9 +606,11 @@ export default function AgenticDashboard() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showScheduler, setShowScheduler] = useState(false);
   const [showWebhook, setShowWebhook] = useState(false);
+  const [showIntegrations, setShowIntegrations] = useState(false);
 
   const { stats, recordRun, resetStats } = useAnalytics();
   const { webhooks, addWebhook, toggleWebhook, removeWebhook, fireWebhooks } = useWebhook();
+  const { integrations, updateIntegration, toggleIntegration, fireIntegrations } = useIntegrations();
 
   // Scheduler: when a schedule fires, run the matching flow.
   // runOrchestration is defined later in the component; use a ref to avoid stale closures.
@@ -613,6 +622,10 @@ export default function AgenticDashboard() {
   }, []);
 
   const { schedules, addSchedule, toggleSchedule, removeSchedule } = useScheduler(handleScheduleTrigger);
+
+  const { showOnboarding, completeOnboarding } = useOnboarding();
+  const { workspaces, activeWorkspace, switchWorkspace, addWorkspace } = useWorkspace();
+  const { cronResults, syncSchedule, removeServerSchedule, triggerCronNow } = useCronScheduler();
 
   const addCeoLog = (text) =>
     setCeoLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString() }]);
@@ -727,7 +740,9 @@ export default function AgenticDashboard() {
 
       try {
         if (HAS_API_KEY) {
-          await runClaudeStep(agentId, taskForAgent);
+          // Build a context-aware prompt chaining in previous agents' outputs
+          const chainedTask = buildChainedPrompt(agentId, taskForAgent, completedResults);
+          await runClaudeStep(agentId, chainedTask);
         } else {
           await runFakeStep(agentId);
         }
@@ -736,10 +751,19 @@ export default function AgenticDashboard() {
           a.id === agentId ? { ...a, status: "done", progress: 100 } : a
         ));
 
+        // Capture output for chaining context (excluding control lines)
+        let agentOutput = "";
+        setAgents(prev => {
+          const a = prev.find(x => x.id === agentId);
+          agentOutput = (a?.logs || [])
+            .filter(l => !l.startsWith("▶") && !l.startsWith("Queue") && !l.startsWith("Standby"))
+            .join("\n");
+          return prev;
+        });
         completedResults.push({
           agentId,
           agentName: configAgents.find(a => a.id === agentId)?.name || agentId,
-          output: "",
+          output: extractChainContext(agentOutput),
           task: taskForAgent,
         });
 
@@ -897,6 +921,13 @@ export default function AgenticDashboard() {
   };
 
   return (
+    <>
+    {showOnboarding && (
+      <OnboardingWizard
+        onComplete={completeOnboarding}
+        onSkip={completeOnboarding}
+      />
+    )}
     <div className="main-wrapper" style={{
       minHeight: "100vh",
       background: "#07070f",
@@ -965,6 +996,12 @@ export default function AgenticDashboard() {
           <h1 style={{ color: "#fff", fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 20, letterSpacing: -0.5 }}>
             Denis's Command Center
           </h1>
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            activeWorkspace={activeWorkspace}
+            onSwitch={switchWorkspace}
+            onAdd={addWorkspace}
+          />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={() => setShowTemplates(true)} style={{
@@ -997,6 +1034,20 @@ export default function AgenticDashboard() {
           }}>
             ⬡ WEBHOOKS {webhooks.filter(w=>w.enabled).length > 0 ? `(${webhooks.filter(w=>w.enabled).length})` : ""}
           </button>
+          {(() => {
+            const activeIntegrations = Object.values(integrations).filter(i => i.enabled).length;
+            return (
+              <button onClick={() => setShowIntegrations(true)} style={{
+                background: activeIntegrations > 0 ? "#F0C04018" : "#ffffff08",
+                border: `1px solid ${activeIntegrations > 0 ? "#F0C04044" : "#ffffff15"}`,
+                color: activeIntegrations > 0 ? "#F0C040" : "#ffffffcc",
+                padding: "7px 14px", borderRadius: 9,
+                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+              }}>
+                🔌 INTEGRATIONS {activeIntegrations > 0 ? `(${activeIntegrations})` : ""}
+              </button>
+            );
+          })()}
           {results.length > 0 && (
             <button onClick={() => setShowOutputPanel(p => !p)} style={{
               background: showOutputPanel ? "#38BDF822" : "#ffffff08",
@@ -1155,7 +1206,7 @@ export default function AgenticDashboard() {
       {/* ── FOOTER ── */}
       <div style={{ marginTop: 28, display: "flex", alignItems: "center", justifyContent: "space-between", opacity: 0.35 }}>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
-          AGENTIC DASHBOARD v0.3 — POWERED BY CLAUDE API
+          AGENTIC DASHBOARD v0.4 — POWERED BY CLAUDE API
         </div>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
           {agents.filter(a => a.status === "done").length}/{agents.length} TASKS COMPLETE
@@ -1237,9 +1288,17 @@ export default function AgenticDashboard() {
         <SchedulerModal
           schedules={schedules}
           flows={[...ORCHESTRA_FLOWS, { id: "custom", name: "Custom Flow" }]}
-          onAdd={addSchedule}
+          onAdd={(schedule) => {
+            addSchedule(schedule);
+            syncSchedule(schedule); // also sync to server-side cron
+          }}
           onToggle={toggleSchedule}
-          onRemove={removeSchedule}
+          onRemove={(id) => {
+            removeSchedule(id);
+            removeServerSchedule(id);
+          }}
+          onTriggerNow={triggerCronNow}
+          cronResults={cronResults}
           onClose={() => setShowScheduler(false)}
         />
       )}
@@ -1254,6 +1313,17 @@ export default function AgenticDashboard() {
           onClose={() => setShowWebhook(false)}
         />
       )}
+
+      {/* ── INTEGRATIONS ── */}
+      {showIntegrations && (
+        <IntegrationsModal
+          integrations={integrations}
+          onUpdate={updateIntegration}
+          onToggle={toggleIntegration}
+          onClose={() => setShowIntegrations(false)}
+        />
+      )}
     </div>
+    </>
   );
 }
