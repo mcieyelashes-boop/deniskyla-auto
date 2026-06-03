@@ -36,6 +36,12 @@ import CommandPalette from "./components/CommandPalette";
 import BatchRunner from "./components/BatchRunner";
 import { useCEOMemory } from "./hooks/useCEOMemory";
 import { useAgentScoring } from "./hooks/useAgentScoring";
+import ReportModal from "./components/ReportModal";
+import ResultsChat from "./components/ResultsChat";
+import EmbedModal from "./components/EmbedModal";
+import DependencyEditor from "./components/DependencyEditor";
+import { useTriggerPoller } from "./hooks/useTriggerPoller";
+import { useAgentDependencies } from "./hooks/useAgentDependencies";
 
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
 You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
@@ -654,6 +660,16 @@ export default function AgenticDashboard() {
 
   const { schedules, addSchedule, toggleSchedule, removeSchedule } = useScheduler(handleScheduleTrigger);
 
+  // External webhook/API triggers — run the matching flow when one arrives.
+  useTriggerPoller((trigger) => {
+    runOrchestrationRef.current?.({
+      id: "trigger-" + trigger.id,
+      name: "⚡ " + trigger.flowName,
+      chain: trigger.chain,
+      desc: trigger.context || "External trigger",
+    });
+  });
+
   const { showOnboarding, completeOnboarding } = useOnboarding();
   const { workspaces, activeWorkspace, switchWorkspace, addWorkspace } = useWorkspace();
   const { cronResults, syncSchedule, removeServerSchedule, triggerCronNow } = useCronScheduler();
@@ -663,6 +679,7 @@ export default function AgenticDashboard() {
   const { versions, versionsByFlow, saveVersion, deleteVersion, clearVersions } = useFlowVersions();
   const { memory, updateMemory, addInsight, clearMemory, buildMemoryContext } = useCEOMemory();
   const { scores, rateResult, getAgentScore, getOverallStats } = useAgentScoring();
+  const { dependencies, addDependency, removeDependency, resolveChain } = useAgentDependencies();
 
   const [viewMode, setViewMode] = useState("grid"); // "grid" | "kanban"
   const [showMemory, setShowMemory] = useState(false);
@@ -675,6 +692,10 @@ export default function AgenticDashboard() {
   const [editingAgent, setEditingAgent] = useState(null);
   const [showShare, setShowShare] = useState(false);
   const [showFlowSuggester, setShowFlowSuggester] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [showEmbed, setShowEmbed] = useState(false);
+  const [showDeps, setShowDeps] = useState(false);
 
   const addCeoLog = (text) =>
     setCeoLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString() }]);
@@ -759,24 +780,26 @@ export default function AgenticDashboard() {
     if (orchestrating) return;
     const runStartTime = Date.now();
     cancelRef.current = false;
+    // Resolve agent dependencies — reorder chain so deps run before dependents.
+    const chain = resolveChain(flow.chain);
     setActiveFlow(flow);
     setOrchestrating(true);
 
     // Reset all agents
     setAgents(prev => prev.map(a => ({
       ...a,
-      status: flow.chain.includes(a.id) ? "queued" : "idle",
+      status: chain.includes(a.id) ? "queued" : "idle",
       progress: 0,
-      logs: flow.chain.includes(a.id) ? ["Queued — menunggu giliran..."] : ["Standby"],
+      logs: chain.includes(a.id) ? ["Queued — menunggu giliran..."] : ["Standby"],
     })));
 
     await sleep(400);
 
     const completedResults = [];
 
-    for (let stepIndex = 0; stepIndex < flow.chain.length; stepIndex++) {
+    for (let stepIndex = 0; stepIndex < chain.length; stepIndex++) {
       if (cancelRef.current) break;
-      const agentId = flow.chain[stepIndex];
+      const agentId = chain[stepIndex];
       setActiveChainStep(stepIndex);
 
       // Mark as running and capture its current task
@@ -1006,6 +1029,9 @@ export default function AgenticDashboard() {
         else if (cmd.panel === "scheduler") setShowScheduler(true);
         else if (cmd.panel === "addAgent") setShowAddAgent(true);
         else if (cmd.panel === "memory") setShowMemory(true);
+        else if (cmd.panel === "report" && results.length) setShowReport(true);
+        else if (cmd.panel === "chat" && results.length) setShowChat(true);
+        else if (cmd.panel === "deps") setShowDeps(true);
         break;
       case "toggle-theme": toggleTheme(); break;
       case "toggle":
@@ -1155,6 +1181,42 @@ export default function AgenticDashboard() {
           }}>
             ⊞ BATCH
           </button>
+
+          {/* Dependencies */}
+          <button onClick={() => setShowDeps(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ⇒ DEPS
+          </button>
+          {results.length > 0 && (
+            <>
+              <button onClick={() => setShowReport(true)} style={{
+                background: "#ffffff08", border: "1px solid #ffffff15",
+                color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+              }}>
+                📄 REPORT
+              </button>
+              <button onClick={() => setShowChat(p => !p)} style={{
+                background: showChat ? "#A78BFA22" : "#ffffff08",
+                border: `1px solid ${showChat ? "#A78BFA44" : "#ffffff15"}`,
+                color: showChat ? "#A78BFA" : "#ffffffcc",
+                padding: "7px 14px", borderRadius: 9,
+                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+              }}>
+                💬 CHAT
+              </button>
+              <button onClick={() => setShowEmbed(true)} style={{
+                background: "#ffffff08", border: "1px solid #ffffff15",
+                color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+              }}>
+                {"</>"}  EMBED
+              </button>
+            </>
+          )}
 
           {/* Versions */}
           <button onClick={() => setShowVersions(true)} style={{
@@ -1338,6 +1400,15 @@ export default function AgenticDashboard() {
         />
       )}
 
+      {/* ── RESULTS CHAT (side panel) ── */}
+      {showChat && results.length > 0 && (
+        <ResultsChat
+          results={results}
+          flowName={activeFlow?.name || "Flow Results"}
+          onClose={() => setShowChat(false)}
+        />
+      )}
+
       {/* ── CONNECTION INDICATOR ── */}
       {activeFlow && (
         <div style={{
@@ -1413,7 +1484,7 @@ export default function AgenticDashboard() {
       {/* ── FOOTER ── */}
       <div style={{ marginTop: 28, display: "flex", alignItems: "center", justifyContent: "space-between", opacity: 0.35 }}>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
-          AGENTIC DASHBOARD v0.6 — POWERED BY CLAUDE API
+          AGENTIC DASHBOARD v0.7 — POWERED BY CLAUDE API
         </div>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
           {agents.filter(a => a.status === "done").length}/{agents.length} TASKS COMPLETE
@@ -1566,6 +1637,37 @@ export default function AgenticDashboard() {
           results={results}
           flowName={activeFlow?.name || "Flow Results"}
           onClose={() => setShowShare(false)}
+        />
+      )}
+
+      {/* ── REPORT MODAL ── */}
+      {showReport && results.length > 0 && (
+        <ReportModal
+          results={results}
+          flowName={activeFlow?.name || "Flow Results"}
+          ranAt={activeFlow ? Date.now() : Date.now()}
+          duration={0}
+          activeWorkspace={activeWorkspace}
+          onClose={() => setShowReport(false)}
+        />
+      )}
+
+      {/* ── EMBED MODAL ── */}
+      {showEmbed && (
+        <EmbedModal
+          shareId={activeFlow?.id || "default"}
+          onClose={() => setShowEmbed(false)}
+        />
+      )}
+
+      {/* ── DEPENDENCY EDITOR ── */}
+      {showDeps && (
+        <DependencyEditor
+          dependencies={dependencies}
+          agents={configAgents}
+          onAdd={addDependency}
+          onRemove={removeDependency}
+          onClose={() => setShowDeps(false)}
         />
       )}
 
