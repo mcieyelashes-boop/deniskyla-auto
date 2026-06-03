@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Dark background circle -->
+  <rect width="512" height="512" rx="100" fill="#07070f"/>
+  <!-- Gold diamond/octagon shape -->
+  <polygon points="256,80 380,180 420,256 380,332 256,432 132,332 92,256 132,180"
+           fill="none" stroke="#F0C040" stroke-width="16"/>
+  <!-- Inner smaller shape -->
+  <polygon points="256,140 336,200 360,256 336,312 256,372 176,312 152,256 176,200"
+           fill="#F0C04022" stroke="#F0C040" stroke-width="8"/>
+  <!-- Center dot -->
+  <circle cx="256" cy="256" r="24" fill="#F0C040"/>
+  <!-- Connecting lines -->
+  <line x1="256" y1="80" x2="256" y2="140" stroke="#F0C04066" stroke-width="4"/>
+  <line x1="256" y1="372" x2="256" y2="432" stroke="#F0C04066" stroke-width="4"/>
+</svg>

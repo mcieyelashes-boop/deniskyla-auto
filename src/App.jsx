@@ -29,6 +29,13 @@ import FlowSuggester from "./components/FlowSuggester";
 import { usePWA } from "./hooks/usePWA";
 import { useTheme } from "./hooks/useTheme";
 import { useFlowVersions } from "./hooks/useFlowVersions";
+import KanbanBoard from "./components/KanbanBoard";
+import MobileNav, { MobileNavSpacer } from "./components/MobileNav";
+import CEOMemoryPanel from "./components/CEOMemoryPanel";
+import CommandPalette from "./components/CommandPalette";
+import BatchRunner from "./components/BatchRunner";
+import { useCEOMemory } from "./hooks/useCEOMemory";
+import { useAgentScoring } from "./hooks/useAgentScoring";
 
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
 You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
@@ -654,6 +661,13 @@ export default function AgenticDashboard() {
   const { installPrompt, isInstalled, swReady, install } = usePWA();
   const { theme, themeName, toggleTheme } = useTheme();
   const { versions, versionsByFlow, saveVersion, deleteVersion, clearVersions } = useFlowVersions();
+  const { memory, updateMemory, addInsight, clearMemory, buildMemoryContext } = useCEOMemory();
+  const { scores, rateResult, getAgentScore, getOverallStats } = useAgentScoring();
+
+  const [viewMode, setViewMode] = useState("grid"); // "grid" | "kanban"
+  const [showMemory, setShowMemory] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
+  const [mobileTab, setMobileTab] = useState("dashboard");
 
   const [showInstallBanner, setShowInstallBanner] = useState(true);
   const [showVersions, setShowVersions] = useState(false);
@@ -855,6 +869,12 @@ export default function AgenticDashboard() {
     recordRun({ flowName: flow.name, agents: flow.chain, durationMs, hadError: cancelRef.current });
     fireWebhooks({ flowName: flow.name, agentCount: flow.chain.length, results: completedResults });
 
+    // Add key insight to CEO memory
+    if (completedResults.length > 0) {
+      const topOutput = completedResults[0]?.output?.slice(0, 150) || "";
+      if (topOutput) addInsight(topOutput, flow.name);
+    }
+
     // Save flow version snapshot
     saveVersion({
       flowName: flow.name,
@@ -888,7 +908,8 @@ export default function AgenticDashboard() {
       let plan, chosen;
 
       if (HAS_API_KEY) {
-        const raw = await callClaude(CEO_SYSTEM_PROMPT, cmd);
+        const memoryContext = buildMemoryContext();
+        const raw = await callClaude(CEO_SYSTEM_PROMPT + memoryContext, cmd);
         let parsed;
         try {
           // Strip markdown fences if present
@@ -968,6 +989,34 @@ export default function AgenticDashboard() {
     setActiveFlow(null);
     setActiveChainStep(-1);
     setCeoLogs([]);
+  };
+
+  const handleCommand = (cmd) => {
+    switch (cmd.action) {
+      case "run-flow": {
+        const flow = ORCHESTRA_FLOWS.find(f => f.id === cmd.flowId);
+        if (flow) runOrchestration(flow);
+        break;
+      }
+      case "open":
+        if (cmd.panel === "analytics") setShowAnalytics(true);
+        else if (cmd.panel === "history") setShowHistory(true);
+        else if (cmd.panel === "templates") setShowTemplates(true);
+        else if (cmd.panel === "versions") setShowVersions(true);
+        else if (cmd.panel === "scheduler") setShowScheduler(true);
+        else if (cmd.panel === "addAgent") setShowAddAgent(true);
+        else if (cmd.panel === "memory") setShowMemory(true);
+        break;
+      case "toggle-theme": toggleTheme(); break;
+      case "toggle":
+        if (cmd.panel === "suggest") setShowFlowSuggester(p => !p);
+        break;
+      case "reset": resetAll(); break;
+      case "export":
+        if (cmd.format === "json" && results.length) exportJSON(results);
+        break;
+      default: break;
+    }
   };
 
   const handleSaveOutput = (agentId, editedOutput) => {
@@ -1071,6 +1120,40 @@ export default function AgenticDashboard() {
             cursor: "pointer", fontSize: 14,
           }} title={`Switch to ${themeName === "dark" ? "light" : "dark"} mode`}>
             {themeName === "dark" ? "☀" : "🌙"}
+          </button>
+
+          {/* View mode toggle: Grid / Kanban */}
+          <div style={{ display: "flex", background: "#ffffff08", border: "1px solid #ffffff15", borderRadius: 9, overflow: "hidden" }}>
+            <button onClick={() => setViewMode("grid")} style={{
+              background: viewMode === "grid" ? "#F0C04022" : "transparent",
+              border: "none", color: viewMode === "grid" ? "#F0C040" : "#ffffff66",
+              padding: "7px 12px", cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+            }}>⊞ GRID</button>
+            <button onClick={() => setViewMode("kanban")} style={{
+              background: viewMode === "kanban" ? "#F0C04022" : "transparent",
+              border: "none", color: viewMode === "kanban" ? "#F0C040" : "#ffffff66",
+              padding: "7px 12px", cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+            }}>▦ KANBAN</button>
+          </div>
+
+          {/* CEO Memory */}
+          <button onClick={() => setShowMemory(true)} style={{
+            background: memory.businessName ? "#F0C04018" : "#ffffff08",
+            border: `1px solid ${memory.businessName ? "#F0C04033" : "#ffffff15"}`,
+            color: memory.businessName ? "#F0C040" : "#ffffffcc",
+            padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            🧠 MEMORY
+          </button>
+
+          {/* Batch Runner */}
+          <button onClick={() => setShowBatch(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ⊞ BATCH
           </button>
 
           {/* Versions */}
@@ -1302,27 +1385,35 @@ export default function AgenticDashboard() {
         <div style={{ color: "#ffffff33", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: 2, marginBottom: 14 }}>
           SUB-AGENTS — {agents.length} TOTAL
         </div>
-        <div className="agents-grid" style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: 14,
-        }}>
-          {agents.map(agent => (
-            <AgentCard
-              key={agent.id}
-              agent={agent}
-              isSelected={selectedAgent?.id === agent.id}
-              onClick={() => setSelectedAgent(selectedAgent?.id === agent.id ? null : agent)}
-              pulse={agent.status === "running"}
-            />
-          ))}
-        </div>
+        {viewMode === "grid" ? (
+          <div className="agents-grid" style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+            gap: 14,
+          }}>
+            {agents.map(agent => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                isSelected={selectedAgent?.id === agent.id}
+                onClick={() => setSelectedAgent(selectedAgent?.id === agent.id ? null : agent)}
+                pulse={agent.status === "running"}
+              />
+            ))}
+          </div>
+        ) : (
+          <KanbanBoard
+            agents={agents}
+            onAgentClick={(a) => setSelectedAgent(selectedAgent?.id === a.id ? null : a)}
+            orchestrating={orchestrating}
+          />
+        )}
       </div>
 
       {/* ── FOOTER ── */}
       <div style={{ marginTop: 28, display: "flex", alignItems: "center", justifyContent: "space-between", opacity: 0.35 }}>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
-          AGENTIC DASHBOARD v0.5 — POWERED BY CLAUDE API
+          AGENTIC DASHBOARD v0.6 — POWERED BY CLAUDE API
         </div>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
           {agents.filter(a => a.status === "done").length}/{agents.length} TASKS COMPLETE
@@ -1477,6 +1568,43 @@ export default function AgenticDashboard() {
           onClose={() => setShowShare(false)}
         />
       )}
+
+      {/* ── COMMAND PALETTE (mounted once) ── */}
+      <CommandPalette
+        onCommand={handleCommand}
+        flows={ORCHESTRA_FLOWS}
+        agents={configAgents}
+      />
+
+      {/* ── CEO MEMORY ── */}
+      {showMemory && (
+        <CEOMemoryPanel
+          memory={memory}
+          onUpdate={updateMemory}
+          onAddInsight={addInsight}
+          onClear={clearMemory}
+          onClose={() => setShowMemory(false)}
+        />
+      )}
+
+      {/* ── BATCH RUNNER ── */}
+      {showBatch && (
+        <BatchRunner
+          flows={ORCHESTRA_FLOWS}
+          agents={configAgents}
+          onClose={() => setShowBatch(false)}
+        />
+      )}
+
+      {/* ── MOBILE NAV ── */}
+      <MobileNavSpacer />
+      <MobileNav
+        activeTab={mobileTab}
+        onTabChange={setMobileTab}
+        agentsDoneCount={agents.filter(a => a.status === "done").length}
+        hasResults={results.length > 0}
+        notifCount={sessions.length}
+      />
     </div>
     </>
   );
