@@ -21,6 +21,14 @@ import { useIntegrations } from "./hooks/useIntegrations";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { useCronScheduler } from "./hooks/useCronScheduler";
 import { buildChainedPrompt, extractChainContext } from "./lib/agentChain";
+import InstallBanner from "./components/InstallBanner";
+import FlowVersionsPanel from "./components/FlowVersionsPanel";
+import OutputEditor from "./components/OutputEditor";
+import ShareModal from "./components/ShareModal";
+import FlowSuggester from "./components/FlowSuggester";
+import { usePWA } from "./hooks/usePWA";
+import { useTheme } from "./hooks/useTheme";
+import { useFlowVersions } from "./hooks/useFlowVersions";
 
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
 You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
@@ -350,7 +358,7 @@ function CEOPanel({ agents, onOrchestrate, orchestrating, activeFlow, ceoInput, 
 
 // ─── AGENT DETAIL PANEL ──────────────────────────────────────────────────────
 
-function AgentDetailPanel({ agent, onClose, allAgents }) {
+function AgentDetailPanel({ agent, onClose, allAgents, onEdit }) {
   if (!agent) return null;
   return (
     <div className="detail-panel" style={{
@@ -427,6 +435,22 @@ function AgentDetailPanel({ agent, onClose, allAgents }) {
           ))}
         </div>
       </div>
+
+      {/* Edit output (when done) */}
+      {agent.status === "done" && onEdit && (
+        <button
+          onClick={() => onEdit(agent)}
+          style={{
+            marginTop: 12, width: "100%",
+            background: "#A78BFA18", border: "1px solid #A78BFA44",
+            borderRadius: 10, padding: "9px",
+            color: "#A78BFA", fontFamily: "'Syne', sans-serif",
+            fontWeight: 700, fontSize: 12, cursor: "pointer",
+          }}
+        >
+          ✏ EDIT OUTPUT
+        </button>
+      )}
     </div>
   );
 }
@@ -627,6 +651,17 @@ export default function AgenticDashboard() {
   const { workspaces, activeWorkspace, switchWorkspace, addWorkspace } = useWorkspace();
   const { cronResults, syncSchedule, removeServerSchedule, triggerCronNow } = useCronScheduler();
 
+  const { installPrompt, isInstalled, swReady, install } = usePWA();
+  const { theme, themeName, toggleTheme } = useTheme();
+  const { versions, versionsByFlow, saveVersion, deleteVersion, clearVersions } = useFlowVersions();
+
+  const [showInstallBanner, setShowInstallBanner] = useState(true);
+  const [showVersions, setShowVersions] = useState(false);
+  const [showOutputEditor, setShowOutputEditor] = useState(false);
+  const [editingAgent, setEditingAgent] = useState(null);
+  const [showShare, setShowShare] = useState(false);
+  const [showFlowSuggester, setShowFlowSuggester] = useState(false);
+
   const addCeoLog = (text) =>
     setCeoLogs(prev => [...prev, { text, time: new Date().toLocaleTimeString() }]);
 
@@ -819,6 +854,21 @@ export default function AgenticDashboard() {
     const durationMs = Date.now() - runStartTime;
     recordRun({ flowName: flow.name, agents: flow.chain, durationMs, hadError: cancelRef.current });
     fireWebhooks({ flowName: flow.name, agentCount: flow.chain.length, results: completedResults });
+
+    // Save flow version snapshot
+    saveVersion({
+      flowName: flow.name,
+      flowId: flow.id,
+      ranAt: runStartTime,
+      duration: Date.now() - runStartTime,
+      agents: completedResults.map(r => ({
+        id: r.agentId,
+        name: r.agentName,
+        task: r.task,
+        output: r.output,
+        status: "done",
+      })),
+    });
   };
 
   // Keep ref in sync so scheduler triggers use the latest runOrchestration
@@ -920,6 +970,16 @@ export default function AgenticDashboard() {
     setCeoLogs([]);
   };
 
+  const handleSaveOutput = (agentId, editedOutput) => {
+    setAgents(prev => prev.map(a =>
+      a.id === agentId
+        ? { ...a, logs: [...a.logs.filter(l => !l.startsWith("✏")), `✏ Edited: ${editedOutput.slice(0, 100)}`] }
+        : a
+    ));
+    setShowOutputEditor(false);
+    setEditingAgent(null);
+  };
+
   return (
     <>
     {showOnboarding && (
@@ -1004,6 +1064,45 @@ export default function AgenticDashboard() {
           />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Theme toggle */}
+          <button onClick={toggleTheme} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 10px", borderRadius: 9,
+            cursor: "pointer", fontSize: 14,
+          }} title={`Switch to ${themeName === "dark" ? "light" : "dark"} mode`}>
+            {themeName === "dark" ? "☀" : "🌙"}
+          </button>
+
+          {/* Versions */}
+          <button onClick={() => setShowVersions(true)} style={{
+            background: "#ffffff08", border: "1px solid #ffffff15",
+            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ◑ VERSIONS {versions.length > 0 ? `(${versions.length})` : ""}
+          </button>
+
+          {/* Share button — show when results exist */}
+          {results.length > 0 && (
+            <button onClick={() => setShowShare(true)} style={{
+              background: "#34D39918", border: "1px solid #34D39944",
+              color: "#34D399", padding: "7px 14px", borderRadius: 9,
+              cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+            }}>
+              ↗ SHARE
+            </button>
+          )}
+
+          {/* AI Flow Suggester toggle */}
+          <button onClick={() => setShowFlowSuggester(p => !p)} style={{
+            background: showFlowSuggester ? "#A78BFA22" : "#ffffff08",
+            border: `1px solid ${showFlowSuggester ? "#A78BFA44" : "#ffffff15"}`,
+            color: showFlowSuggester ? "#A78BFA" : "#ffffffcc",
+            padding: "7px 14px", borderRadius: 9,
+            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+          }}>
+            ✦ SUGGEST
+          </button>
           <button onClick={() => setShowTemplates(true)} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
             color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
@@ -1115,6 +1214,15 @@ export default function AgenticDashboard() {
         </div>
       )}
 
+      {/* ── PWA INSTALL BANNER ── */}
+      {installPrompt && !isInstalled && showInstallBanner && (
+        <InstallBanner
+          onInstall={install}
+          onDismiss={() => setShowInstallBanner(false)}
+          swReady={swReady}
+        />
+      )}
+
       {/* ── CEO LAYER ── */}
       <CEOPanel
         agents={agents}
@@ -1138,6 +1246,14 @@ export default function AgenticDashboard() {
           onCEOCommand={handleCEOCommand}
         />
       </div>
+
+      {/* ── AI FLOW SUGGESTER ── */}
+      {showFlowSuggester && (
+        <FlowSuggester
+          onRunFlow={runOrchestration}
+          orchestrating={orchestrating}
+        />
+      )}
 
       {/* ── CONNECTION INDICATOR ── */}
       {activeFlow && (
@@ -1206,7 +1322,7 @@ export default function AgenticDashboard() {
       {/* ── FOOTER ── */}
       <div style={{ marginTop: 28, display: "flex", alignItems: "center", justifyContent: "space-between", opacity: 0.35 }}>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
-          AGENTIC DASHBOARD v0.4 — POWERED BY CLAUDE API
+          AGENTIC DASHBOARD v0.5 — POWERED BY CLAUDE API
         </div>
         <div style={{ color: "#fff", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
           {agents.filter(a => a.status === "done").length}/{agents.length} TASKS COMPLETE
@@ -1219,6 +1335,7 @@ export default function AgenticDashboard() {
           agent={agents.find(a => a.id === selectedAgent.id)}
           onClose={() => setSelectedAgent(null)}
           allAgents={configAgents}
+          onEdit={(agent) => { setEditingAgent(agent); setShowOutputEditor(true); }}
         />
       )}
 
@@ -1321,6 +1438,43 @@ export default function AgenticDashboard() {
           onUpdate={updateIntegration}
           onToggle={toggleIntegration}
           onClose={() => setShowIntegrations(false)}
+        />
+      )}
+
+      {/* ── FLOW VERSIONS PANEL ── */}
+      {showVersions && (
+        <FlowVersionsPanel
+          versions={versions}
+          versionsByFlow={versionsByFlow}
+          onDelete={deleteVersion}
+          onClear={clearVersions}
+          onClose={() => setShowVersions(false)}
+          onReplay={(version) => {
+            setShowVersions(false);
+            runOrchestration({
+              id: "replay-" + version.id,
+              name: "↺ " + version.flowName,
+              chain: version.agents.map(a => a.id),
+            });
+          }}
+        />
+      )}
+
+      {/* ── OUTPUT EDITOR ── */}
+      {showOutputEditor && editingAgent && (
+        <OutputEditor
+          agent={agents.find(a => a.id === editingAgent.id) || editingAgent}
+          onSave={handleSaveOutput}
+          onClose={() => { setShowOutputEditor(false); setEditingAgent(null); }}
+        />
+      )}
+
+      {/* ── SHARE MODAL ── */}
+      {showShare && (
+        <ShareModal
+          results={results}
+          flowName={activeFlow?.name || "Flow Results"}
+          onClose={() => setShowShare(false)}
         />
       )}
     </div>

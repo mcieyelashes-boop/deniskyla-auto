@@ -1,0 +1,19 @@
+{
+  "name": "Denis's Command Center",
+  "short_name": "AgenticOS",
+  "description": "AI-powered agentic automation dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07070f",
+  "theme_color": "#F0C040",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["productivity", "business"],
+  "shortcuts": [
+    { "name": "Product Launch", "url": "/?flow=launch", "description": "Run Product Launch flow" },
+    { "name": "Growth Sprint", "url": "/?flow=growth", "description": "Run Growth Sprint flow" }
+  ]
+}
