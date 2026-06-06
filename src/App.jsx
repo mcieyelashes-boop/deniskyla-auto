@@ -43,8 +43,15 @@ import DependencyEditor from "./components/DependencyEditor";
 import { useTriggerPoller } from "./hooks/useTriggerPoller";
 import { useAgentDependencies } from "./hooks/useAgentDependencies";
 import { useAuth } from "./hooks/useAuth";
+import { useAuthIntent } from "./hooks/useAuthIntent";
 import { useUserApiKey } from "./hooks/useUserApiKey";
 import ApiKeySetup from "./components/ApiKeySetup";
+import { usePlan } from "./hooks/usePlan";
+import UpgradeModal from "./components/UpgradeModal";
+import PlanBadge from "./components/PlanBadge";
+
+// NOTE: cloud sync (useCloudStorage) is available and activates when Supabase
+// env vars are set server-side; per-hook migration is a follow-up.
 
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
 You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
@@ -686,9 +693,14 @@ export default function AgenticDashboard() {
 
   // ── AUTH + BYOK ──
   const { user, signedIn, hasAuth, loading } = useAuth();
+  useAuthIntent();
   const { apiKey, saveApiKey, hasKey, saving, saved } = useUserApiKey();
   const [showApiKeySetup, setShowApiKeySetup] = useState(false);
   const effectiveHasApiKey = HAS_API_KEY || hasKey;
+
+  // ── PLAN ENFORCEMENT ──
+  const { plan, planId, can, canRunFlow, flowsRemaining, recordFlow } = usePlan();
+  const [upgradeModal, setUpgradeModal] = useState(null); // { feature } | { reason: "limit" } | null
 
   useEffect(() => {
     if (hasAuth && signedIn && !hasKey) {
@@ -793,12 +805,17 @@ export default function AgenticDashboard() {
 
   const runOrchestration = async (flow) => {
     if (orchestrating) return;
+    if (!canRunFlow()) {
+      setUpgradeModal({ reason: "limit" });
+      return;
+    }
     const runStartTime = Date.now();
     cancelRef.current = false;
     // Resolve agent dependencies — reorder chain so deps run before dependents.
     const chain = resolveChain(flow.chain);
     setActiveFlow(flow);
     setOrchestrating(true);
+    recordFlow();
 
     // Reset all agents
     setAgents(prev => prev.map(a => ({
@@ -1197,6 +1214,13 @@ export default function AgenticDashboard() {
             </div>
           )}
 
+          {/* Plan badge */}
+          <PlanBadge
+            plan={plan}
+            flowsRemaining={flowsRemaining}
+            onClick={() => planId === "free" ? setUpgradeModal({ reason: "upgrade" }) : null}
+          />
+
           {/* Theme toggle */}
           <button onClick={toggleTheme} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
@@ -1232,7 +1256,7 @@ export default function AgenticDashboard() {
           </button>
 
           {/* Batch Runner */}
-          <button onClick={() => setShowBatch(true)} style={{
+          <button onClick={() => can("batchRunner") ? setShowBatch(true) : setUpgradeModal({ feature: "batchRunner" })} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
             color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
             cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
@@ -1277,7 +1301,7 @@ export default function AgenticDashboard() {
           )}
 
           {/* Versions */}
-          <button onClick={() => setShowVersions(true)} style={{
+          <button onClick={() => can("flowVersioning") ? setShowVersions(true) : setUpgradeModal({ feature: "flowVersioning" })} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
             color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
             cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
@@ -1306,12 +1330,12 @@ export default function AgenticDashboard() {
           }}>
             ✦ SUGGEST
           </button>
-          <button onClick={() => setShowTemplates(true)} style={{
+          <button onClick={() => can("templates") ? setShowTemplates(true) : setUpgradeModal({ feature: "templates" })} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
             color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
             cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
           }}>
-            ✦ TEMPLATES
+            ✦ TEMPLATES{!can("templates") ? " 🔒" : ""}
           </button>
           <button onClick={() => setShowAnalytics(true)} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
@@ -1320,33 +1344,33 @@ export default function AgenticDashboard() {
           }}>
             ◎ ANALYTICS {stats.totalRuns > 0 ? `(${stats.totalRuns})` : ""}
           </button>
-          <button onClick={() => setShowScheduler(true)} style={{
+          <button onClick={() => can("scheduledFlows") ? setShowScheduler(true) : setUpgradeModal({ feature: "scheduledFlows" })} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
             color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
             cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
           }}>
-            ⏱ SCHEDULER {schedules.filter(s=>s.enabled).length > 0 ? `(${schedules.filter(s=>s.enabled).length})` : ""}
+            ⏱ SCHEDULER {schedules.filter(s=>s.enabled).length > 0 ? `(${schedules.filter(s=>s.enabled).length})` : ""}{!can("scheduledFlows") ? " 🔒" : ""}
           </button>
-          <button onClick={() => setShowWebhook(true)} style={{
+          <button onClick={() => can("webhooks") ? setShowWebhook(true) : setUpgradeModal({ feature: "webhooks" })} style={{
             background: webhooks.filter(w=>w.enabled).length > 0 ? "#34D39918" : "#ffffff08",
             border: `1px solid ${webhooks.filter(w=>w.enabled).length > 0 ? "#34D39944" : "#ffffff15"}`,
             color: webhooks.filter(w=>w.enabled).length > 0 ? "#34D399" : "#ffffffcc",
             padding: "7px 14px", borderRadius: 9,
             cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
           }}>
-            ⬡ WEBHOOKS {webhooks.filter(w=>w.enabled).length > 0 ? `(${webhooks.filter(w=>w.enabled).length})` : ""}
+            ⬡ WEBHOOKS {webhooks.filter(w=>w.enabled).length > 0 ? `(${webhooks.filter(w=>w.enabled).length})` : ""}{!can("webhooks") ? " 🔒" : ""}
           </button>
           {(() => {
             const activeIntegrations = Object.values(integrations).filter(i => i.enabled).length;
             return (
-              <button onClick={() => setShowIntegrations(true)} style={{
+              <button onClick={() => can("integrations") ? setShowIntegrations(true) : setUpgradeModal({ feature: "integrations" })} style={{
                 background: activeIntegrations > 0 ? "#F0C04018" : "#ffffff08",
                 border: `1px solid ${activeIntegrations > 0 ? "#F0C04044" : "#ffffff15"}`,
                 color: activeIntegrations > 0 ? "#F0C040" : "#ffffffcc",
                 padding: "7px 14px", borderRadius: 9,
                 cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
               }}>
-                🔌 INTEGRATIONS {activeIntegrations > 0 ? `(${activeIntegrations})` : ""}
+                🔌 INTEGRATIONS {activeIntegrations > 0 ? `(${activeIntegrations})` : ""}{!can("integrations") ? " 🔒" : ""}
               </button>
             );
           })()}
@@ -1753,6 +1777,16 @@ export default function AgenticDashboard() {
           flows={ORCHESTRA_FLOWS}
           agents={configAgents}
           onClose={() => setShowBatch(false)}
+        />
+      )}
+
+      {/* ── UPGRADE MODAL ── */}
+      {upgradeModal && (
+        <UpgradeModal
+          feature={upgradeModal.feature}
+          reason={upgradeModal.reason}
+          currentPlan={planId}
+          onClose={() => setUpgradeModal(null)}
         />
       )}
 
