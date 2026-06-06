@@ -1,42 +1,34 @@
 import { useState, useEffect } from "react";
-import { HAS_AUTH, getCurrentUser, isSignedIn } from "../lib/auth";
+
+const HAS_AUTH = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 export function useAuth() {
-  const [user, setUser] = useState(() => getCurrentUser());
-  const [signedIn, setSignedIn] = useState(() => isSignedIn());
+  const [user, setUser] = useState(null);
+  const [signedIn, setSignedIn] = useState(false);
   const [loading, setLoading] = useState(HAS_AUTH);
 
   useEffect(() => {
-    if (!HAS_AUTH) {
-      setLoading(false);
-      return;
-    }
+    if (!HAS_AUTH) { setLoading(false); return; }
 
-    const checkAuth = () => {
-      setUser(getCurrentUser());
-      setSignedIn(isSignedIn());
-      setLoading(false);
-    };
-
-    // Clerk loads asynchronously
-    if (window.Clerk) {
-      checkAuth();
-    } else {
-      const interval = setInterval(() => {
-        if (window.Clerk) {
-          clearInterval(interval);
-          checkAuth();
-        }
-      }, 100);
-      const timeout = setTimeout(() => {
-        clearInterval(interval);
+    let attempts = 0;
+    const check = () => {
+      if (window.Clerk) {
+        setUser(window.Clerk.user || null);
+        setSignedIn(!!window.Clerk.user);
         setLoading(false);
-      }, 5000);
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timeout);
-      };
-    }
+        // Listen for changes
+        window.Clerk.addListener?.((state) => {
+          setUser(state.user || null);
+          setSignedIn(!!state.user);
+        });
+      } else if (attempts < 50) {
+        attempts++;
+        setTimeout(check, 100);
+      } else {
+        setLoading(false);
+      }
+    };
+    check();
   }, []);
 
   const signOut = async () => {

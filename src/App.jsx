@@ -1173,6 +1173,18 @@ export default function AgenticDashboard() {
             </button>
           )}
 
+          {/* Sign in button when not signed in */}
+          {hasAuth && !signedIn && !loading && (
+            <button onClick={() => window.Clerk?.openSignIn?.()} style={{
+              background: "linear-gradient(135deg, #F0C040, #F59E0B)",
+              border: "none", borderRadius: 9, padding: "7px 14px",
+              color: "#000", fontFamily: "'Syne', sans-serif",
+              fontWeight: 700, fontSize: 11, cursor: "pointer",
+            }}>
+              SIGN IN
+            </button>
+          )}
+
           {/* User info + sign out */}
           {hasAuth && signedIn && user && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 8 }}>
