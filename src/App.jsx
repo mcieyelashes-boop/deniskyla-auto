@@ -685,7 +685,7 @@ export default function AgenticDashboard() {
   const { dependencies, addDependency, removeDependency, resolveChain } = useAgentDependencies();
 
   // ── AUTH + BYOK ──
-  const { user, signedIn, hasAuth } = useAuth();
+  const { user, signedIn, hasAuth, loading } = useAuth();
   const { apiKey, saveApiKey, hasKey, saving, saved } = useUserApiKey();
   const [showApiKeySetup, setShowApiKeySetup] = useState(false);
   const effectiveHasApiKey = HAS_API_KEY || hasKey;
