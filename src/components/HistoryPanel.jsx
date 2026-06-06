@@ -1,23 +1,11 @@
 import { useState, useEffect } from "react";
+import { useCloudStorage } from "../hooks/useCloudStorage";
 
 // ─── HISTORY HOOK ────────────────────────────────────────────────────────────
 
 export function useHistory() {
-  const [sessions, setSessions] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("deniskyla_history") || "[]");
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("deniskyla_history", JSON.stringify(sessions));
-    } catch (e) {
-      console.warn("Storage write failed:", e);
-    }
-  }, [sessions]);
+  // Cloud-synced when signed in + Supabase configured; localStorage otherwise.
+  const [sessions, setSessions] = useCloudStorage("deniskyla_history", []);
 
   const addSession = (session) => {
     const entry = { id: Date.now().toString(), ...session };

@@ -1,26 +1,11 @@
-import { useState, useEffect } from "react";
 import { AGENTS as DEFAULT_AGENTS } from "../config/agents";
+import { useCloudStorage } from "./useCloudStorage";
 
 const STORAGE_KEY = "deniskyla_custom_agents";
 
 export function useCustomAgents() {
-  const [customAgents, setCustomAgents] = useState(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  // Persist to localStorage on change
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(customAgents));
-    } catch (e) {
-      console.warn("Storage write failed:", e);
-    }
-  }, [customAgents]);
+  // Cloud-synced when signed in + Supabase configured; localStorage otherwise.
+  const [customAgents, setCustomAgents] = useCloudStorage(STORAGE_KEY, []);
 
   // All agents: defaults first, then custom
   const allAgents = [...DEFAULT_AGENTS, ...customAgents];

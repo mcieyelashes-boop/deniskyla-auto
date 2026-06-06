@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCloudStorage } from "./useCloudStorage";
 
 const STORAGE_KEY = "deniskyla_ceo_memory";
 
@@ -13,24 +13,8 @@ const DEFAULT_MEMORY = {
 };
 
 export function useCEOMemory() {
-  const [memory, setMemory] = useState(() => {
-    try {
-      return {
-        ...DEFAULT_MEMORY,
-        ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"),
-      };
-    } catch {
-      return DEFAULT_MEMORY;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(memory));
-    } catch (e) {
-      console.warn("Memory write failed:", e);
-    }
-  }, [memory]);
+  // Cloud-synced when signed in + Supabase configured; localStorage otherwise.
+  const [memory, setMemory] = useCloudStorage(STORAGE_KEY, DEFAULT_MEMORY);
 
   const updateMemory = (updates) =>
     setMemory((prev) => ({ ...prev, ...updates }));
