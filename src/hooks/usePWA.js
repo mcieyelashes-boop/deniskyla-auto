@@ -6,11 +6,24 @@ export function usePWA() {
   const [swReady, setSwReady] = useState(false);
 
   useEffect(() => {
-    // Register service worker
+    // Register service worker. updateViaCache:"none" forces the browser to
+    // always fetch a fresh sw.js (never from HTTP cache) so updated caching
+    // logic is picked up immediately. We also trigger an explicit update check,
+    // and reload once when a new SW takes control so the latest bundle loads.
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js")
-        .then(() => setSwReady(true))
+      navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
+        .then((reg) => {
+          setSwReady(true);
+          reg.update().catch(() => {});
+        })
         .catch(e => console.warn("SW registration failed:", e));
+
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (reloaded) return;
+        reloaded = true;
+        window.location.reload();
+      });
     }
     // Check if already installed
     if (window.matchMedia("(display-mode: standalone)").matches) {
