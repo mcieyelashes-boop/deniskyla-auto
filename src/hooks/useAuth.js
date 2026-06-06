@@ -11,24 +11,23 @@ export function useAuth() {
     if (!HAS_AUTH) { setLoading(false); return; }
 
     let attempts = 0;
-    const check = () => {
-      if (window.Clerk) {
-        setUser(window.Clerk.user || null);
-        setSignedIn(!!window.Clerk.user);
+    const tick = () => {
+      const ck = window.Clerk;
+      if (ck) {
+        setUser(ck.user || null);
+        setSignedIn(!!ck.user);
         setLoading(false);
-        // Listen for changes
-        window.Clerk.addListener?.((state) => {
-          setUser(state.user || null);
-          setSignedIn(!!state.user);
+        ck.addListener?.((ev) => {
+          setUser(ev.user || null);
+          setSignedIn(!!ev.user);
         });
-      } else if (attempts < 50) {
-        attempts++;
-        setTimeout(check, 100);
+      } else if (attempts++ < 100) {
+        setTimeout(tick, 100);
       } else {
         setLoading(false);
       }
     };
-    check();
+    tick();
   }, []);
 
   const signOut = async () => {
