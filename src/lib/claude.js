@@ -8,11 +8,29 @@ export const HAS_API_KEY = import.meta.env.VITE_HAS_API_KEY === "true" || import
 // Always use /api/claude proxy (key stays server-side)
 const API_ENDPOINT = "/api/claude";
 
+// BYOK: read the user's Anthropic API key from localStorage. Hooks can't be
+// used inside a lib module, so we read the persisted value directly. Kept in
+// sync with the `useUserApiKey` hook (LS_KEY = "user_anthropic_key").
+function getUserApiKey() {
+  try {
+    return localStorage.getItem("user_anthropic_key") || "";
+  } catch {
+    return "";
+  }
+}
+
+function buildHeaders() {
+  const headers = { "content-type": "application/json" };
+  const userKey = getUserApiKey();
+  if (userKey) headers["x-user-api-key"] = userKey;
+  return headers;
+}
+
 // Non-streaming call (used for CEO orchestration — needs full JSON response)
 export async function callClaude(system, userMsg) {
   const resp = await fetch(API_ENDPOINT, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: buildHeaders(),
     body: JSON.stringify({ system, userMsg, stream: false }),
   });
   if (!resp.ok) {
@@ -27,7 +45,7 @@ export async function callClaude(system, userMsg) {
 export async function callClaudeStream(system, userMsg, onChunk) {
   const resp = await fetch(API_ENDPOINT, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: buildHeaders(),
     body: JSON.stringify({ system, userMsg, stream: true }),
   });
   if (!resp.ok) {

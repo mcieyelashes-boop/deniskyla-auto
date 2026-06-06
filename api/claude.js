@@ -1,24 +1,59 @@
+// Allow a request origin if it matches the configured origin(s), localhost,
+// or any *.vercel.app deploy (preview + production). ALLOWED_ORIGIN may be a
+// comma-separated list.
+function isOriginAllowed(origin) {
+  if (!origin) return true; // same-origin / server-to-server requests have no Origin header
+  const configured = (process.env.ALLOWED_ORIGIN || "https://deniskyla-auto.vercel.app")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const staticAllowed = [
+    ...configured,
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:3000",
+  ];
+  if (staticAllowed.includes(origin)) return true;
+  // Allow Vercel preview/production deploys
+  try {
+    const host = new URL(origin).hostname;
+    if (host === "localhost" || host === "127.0.0.1") return true;
+    if (host.endsWith(".vercel.app")) return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 export default async function handler(req, res) {
+  const origin = req.headers.origin || "";
+  const allowed = isOriginAllowed(origin);
+
   if (req.method === "OPTIONS") {
+    if (origin && allowed) res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "content-type");
+    res.setHeader("Access-Control-Allow-Headers", "content-type, x-user-api-key");
     return res.status(200).end();
   }
 
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   // CORS guard
-  const origin = req.headers.origin || "";
-  const allowed = process.env.ALLOWED_ORIGIN || "https://deniskyla-auto.vercel.app";
-  const allowedList = [allowed, "http://localhost:5173", "http://localhost:5174"];
-  if (origin && !allowedList.includes(origin)) {
+  if (origin && !allowed) {
     return res.status(403).json({ error: "Forbidden" });
   }
   if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
 
   const { system, userMsg, stream = false } = req.body;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "API key not configured" });
+
+  // BYOK: use user's key if provided, fall back to env key
+  const userApiKey = req.headers["x-user-api-key"] || "";
+  const apiKey = userApiKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({
+      error: "No API key configured. Please add your Anthropic API key in Settings.",
+    });
+  }
 
   if (!userMsg) return res.status(400).json({ error: "userMsg is required" });
 

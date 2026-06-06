@@ -42,6 +42,9 @@ import EmbedModal from "./components/EmbedModal";
 import DependencyEditor from "./components/DependencyEditor";
 import { useTriggerPoller } from "./hooks/useTriggerPoller";
 import { useAgentDependencies } from "./hooks/useAgentDependencies";
+import { useAuth } from "./hooks/useAuth";
+import { useUserApiKey } from "./hooks/useUserApiKey";
+import ApiKeySetup from "./components/ApiKeySetup";
 
 const CEO_SYSTEM_PROMPT = `You are the CEO Agent orchestrating a marketing automation system.
 You have ${AGENTS.length} sub-agents: ${AGENTS.map(a => `${a.name} (${a.id})`).join(", ")}.
@@ -681,6 +684,18 @@ export default function AgenticDashboard() {
   const { scores, rateResult, getAgentScore, getOverallStats } = useAgentScoring();
   const { dependencies, addDependency, removeDependency, resolveChain } = useAgentDependencies();
 
+  // ── AUTH + BYOK ──
+  const { user, signedIn, hasAuth } = useAuth();
+  const { apiKey, saveApiKey, hasKey, saving, saved } = useUserApiKey();
+  const [showApiKeySetup, setShowApiKeySetup] = useState(false);
+  const effectiveHasApiKey = HAS_API_KEY || hasKey;
+
+  useEffect(() => {
+    if (hasAuth && signedIn && !hasKey) {
+      setShowApiKeySetup(true);
+    }
+  }, [hasAuth, signedIn, hasKey]);
+
   const [viewMode, setViewMode] = useState("grid"); // "grid" | "kanban"
   const [showMemory, setShowMemory] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
@@ -811,7 +826,7 @@ export default function AgenticDashboard() {
       }));
 
       try {
-        if (HAS_API_KEY) {
+        if (effectiveHasApiKey) {
           // Build a context-aware prompt chaining in previous agents' outputs
           const chainedTask = buildChainedPrompt(agentId, taskForAgent, completedResults);
           await runClaudeStep(agentId, chainedTask);
@@ -930,7 +945,7 @@ export default function AgenticDashboard() {
     try {
       let plan, chosen;
 
-      if (HAS_API_KEY) {
+      if (effectiveHasApiKey) {
         const memoryContext = buildMemoryContext();
         const raw = await callClaude(CEO_SYSTEM_PROMPT + memoryContext, cmd);
         let parsed;
@@ -1057,6 +1072,12 @@ export default function AgenticDashboard() {
 
   return (
     <>
+    {showApiKeySetup && !hasKey && (
+      <ApiKeySetup
+        onSave={(key) => { saveApiKey(key); setShowApiKeySetup(false); }}
+        onSkip={() => setShowApiKeySetup(false)}
+      />
+    )}
     {showOnboarding && (
       <OnboardingWizard
         onComplete={completeOnboarding}
@@ -1139,6 +1160,31 @@ export default function AgenticDashboard() {
           />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* API key status indicator */}
+          {hasAuth && (
+            <button onClick={() => setShowApiKeySetup(true)} style={{
+              background: hasKey ? "#34D39918" : "#ef444418",
+              border: `1px solid ${hasKey ? "#34D39944" : "#ef444433"}`,
+              color: hasKey ? "#34D399" : "#ef4444",
+              padding: "7px 10px", borderRadius: 9,
+              cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 10,
+            }} title={hasKey ? "API key configured" : "Add your API key"}>
+              🔑
+            </button>
+          )}
+
+          {/* User info + sign out */}
+          {hasAuth && signedIn && user && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 8 }}>
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#F0C04022", border: "1px solid #F0C04044", display: "flex", alignItems: "center", justifyContent: "center", color: "#F0C040", fontSize: 12, fontFamily: "'Syne', sans-serif", fontWeight: 700 }}>
+                {user.firstName?.[0] || user.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || "U"}
+              </div>
+              <button onClick={() => window.Clerk?.openSignOut?.()} style={{ background: "transparent", border: "none", color: "#ffffff44", cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 10 }}>
+                SIGN OUT
+              </button>
+            </div>
+          )}
+
           {/* Theme toggle */}
           <button onClick={toggleTheme} style={{
             background: "#ffffff08", border: "1px solid #ffffff15",
