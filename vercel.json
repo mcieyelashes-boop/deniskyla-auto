@@ -3,18 +3,11 @@
     "api/claude.js": {
       "maxDuration": 30
     },
-    "api/cron.js": {
-      "maxDuration": 60
-    },
     "api/worker.js": {
       "maxDuration": 60
     }
   },
   "crons": [
-    {
-      "path": "/api/cron",
-      "schedule": "0 9 * * *"
-    },
     {
       "path": "/api/worker",
       "schedule": "0 9 * * *"
