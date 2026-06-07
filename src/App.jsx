@@ -47,8 +47,10 @@ import { useAuthIntent } from "./hooks/useAuthIntent";
 import { useUserApiKey } from "./hooks/useUserApiKey";
 import ApiKeySetup from "./components/ApiKeySetup";
 import { usePlan } from "./hooks/usePlan";
+import { useBilling } from "./hooks/useBilling";
 import UpgradeModal from "./components/UpgradeModal";
 import PlanBadge from "./components/PlanBadge";
+import DataPanel from "./components/DataPanel";
 
 // NOTE: cloud sync (useCloudStorage) is available and activates when Supabase
 // env vars are set server-side; per-hook migration is a follow-up.
@@ -702,11 +704,45 @@ export default function AgenticDashboard() {
   const { plan, planId, can, canRunFlow, flowsRemaining, recordFlow } = usePlan();
   const [upgradeModal, setUpgradeModal] = useState(null); // { feature } | { reason: "limit" } | null
 
+  // ── BILLING ──
+  const { openPortal } = useBilling();
+
+  // ── SERVER EXECUTION ──
+  // Use the server-side execution engine when signed in AND cloud is configured.
+  const useServer = hasAuth && signedIn && !!import.meta.env.VITE_SUPABASE_URL;
+  const getToken = async () => {
+    try { return await window.Clerk?.session?.getToken?.(); } catch { return null; }
+  };
+  const getUserApiKey = () => {
+    try { return localStorage.getItem("user_anthropic_key") || ""; } catch { return ""; }
+  };
+  // Structured output_data (leads/research) collected during a server run.
+  const [runOutputs, setRunOutputs] = useState([]);
+  const [showData, setShowData] = useState(false);
+
   useEffect(() => {
     if (hasAuth && signedIn && !hasKey) {
       setShowApiKeySetup(true);
     }
   }, [hasAuth, signedIn, hasKey]);
+
+  // ── BILLING RETURN HANDLER ──
+  // Strip ?billing=success|cancel from the URL and log a confirmation.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    if (!billing) return;
+    if (billing === "success") {
+      addCeoLog("✓ Subscription active — welcome to Pro!");
+    } else if (billing === "cancel") {
+      addCeoLog("Billing checkout canceled.");
+    }
+    params.delete("billing");
+    const qs = params.toString();
+    const newUrl = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+    window.history.replaceState({}, "", newUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [viewMode, setViewMode] = useState("grid"); // "grid" | "kanban"
   const [showMemory, setShowMemory] = useState(false);
@@ -803,7 +839,7 @@ export default function AgenticDashboard() {
     }
   };
 
-  const runOrchestration = async (flow) => {
+  const runClientOrchestration = async (flow) => {
     if (orchestrating) return;
     if (!canRunFlow()) {
       setUpgradeModal({ reason: "limit" });
@@ -945,6 +981,229 @@ export default function AgenticDashboard() {
       })),
     });
   };
+
+  // ── SERVER EXECUTION PATH ──
+  // Enqueue the flow server-side, then poll /api/worker + /api/run-status until
+  // the run finishes. Updates agent cards, results, and runOutputs (Part 2).
+  const runServerOrchestration = async (flow) => {
+    if (orchestrating) return;
+    if (!canRunFlow()) {
+      setUpgradeModal({ reason: "limit" });
+      return;
+    }
+    const runStartTime = Date.now();
+    cancelRef.current = false;
+    const chain = resolveChain(flow.chain);
+    setActiveFlow(flow);
+    setOrchestrating(true);
+    setRunOutputs([]);
+
+    // Reset agents → queued for chain members.
+    setAgents(prev => prev.map(a => ({
+      ...a,
+      status: chain.includes(a.id) ? "queued" : "idle",
+      progress: 0,
+      logs: chain.includes(a.id) ? ["Queued — menunggu giliran..."] : ["Standby"],
+    })));
+
+    const token = await getToken();
+    if (!token) {
+      addCeoLog("✗ Not signed in — cannot run server flow.");
+      setOrchestrating(false);
+      setActiveFlow(null);
+      return;
+    }
+
+    // Build agentId → task map from current agent state.
+    const tasksMap = {};
+    setAgents(prev => {
+      chain.forEach(id => {
+        const a = prev.find(x => x.id === id);
+        if (a) tasksMap[id] = a.task;
+      });
+      return prev;
+    });
+
+    // 1) Enqueue the run.
+    let runId;
+    try {
+      const r = await fetch("/api/run", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          flowId: flow.id,
+          flowName: flow.name,
+          chain,
+          context: flow.desc || "",
+          tasks: tasksMap,
+        }),
+      });
+      if (r.status === 402) {
+        setUpgradeModal({ reason: "limit" });
+        setOrchestrating(false);
+        setActiveFlow(null);
+        return;
+      }
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.runId) throw new Error(data.error || "Failed to enqueue run");
+      runId = data.runId;
+    } catch (err) {
+      addCeoLog(`✗ ERROR: ${err.message}`);
+      setAgents(prev => prev.map(a => chain.includes(a.id) ? { ...a, status: "error", logs: [...a.logs, `✗ ${err.message}`] } : a));
+      setOrchestrating(false);
+      return;
+    }
+
+    recordFlow();
+    addCeoLog(`Server run started (${runId}).`);
+
+    // Track which outputs we've already pushed (by agent_id) to avoid dupes.
+    const seenOutputs = new Set();
+    const collectedResults = [];
+    let finalStatus = "done";
+
+    // 2) Poll loop: drain worker, then read status.
+    for (let poll = 0; poll < 40; poll++) {
+      if (cancelRef.current) { finalStatus = "canceled"; break; }
+
+      // Drain up to 5 jobs (forward BYOK key for the worker).
+      try {
+        await fetch("/api/worker", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "x-user-api-key": getUserApiKey(),
+          },
+        });
+      } catch { /* transient — status poll still informs us */ }
+
+      if (cancelRef.current) { finalStatus = "canceled"; break; }
+
+      // Read status.
+      let status;
+      try {
+        const sr = await fetch(`/api/run-status?runId=${encodeURIComponent(runId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        status = await sr.json().catch(() => null);
+        if (!sr.ok || !status) throw new Error(status?.error || "status read failed");
+      } catch (err) {
+        addCeoLog(`status poll error: ${err.message}`);
+        await sleep(2500);
+        continue;
+      }
+
+      const jobs = status.jobs || [];
+      const outputs = status.outputs || [];
+
+      // Map job statuses onto agent cards.
+      setAgents(prev => prev.map(a => {
+        const job = jobs.find(j => j.agent_id === a.id);
+        if (!job) return a;
+        let progress = a.progress;
+        if (job.status === "running") progress = Math.max(progress, 50);
+        if (job.status === "done") progress = 100;
+        const next = { ...a, status: job.status === "pending" ? "queued" : job.status, progress };
+        if (job.status === "error" && job.error && !a.logs.some(l => l.includes("✗ ERROR"))) {
+          next.logs = [...a.logs, `✗ ERROR: ${job.error}`];
+        }
+        return next;
+      }));
+
+      // Push new outputs into agent logs + results + runOutputs.
+      for (const out of outputs) {
+        if (seenOutputs.has(out.agent_id)) continue;
+        seenOutputs.add(out.agent_id);
+        const meta = configAgents.find(a => a.id === out.agent_id);
+        const text = out.output || "";
+
+        setAgents(prev => prev.map(a =>
+          a.id === out.agent_id
+            ? { ...a, status: "done", progress: 100, logs: [...a.logs, ...text.split("\n").filter(Boolean)] }
+            : a
+        ));
+
+        if (text && meta) {
+          const resultObj = {
+            id: out.agent_id + "-" + Date.now(),
+            agentId: out.agent_id,
+            agentName: out.agent_name || meta.name,
+            agentColor: meta.color,
+            agentIcon: meta.icon,
+            task: tasksMap[out.agent_id] || meta.defaultTask,
+            output: text,
+            timestamp: out.created_at ? new Date(out.created_at).getTime() : Date.now(),
+          };
+          setResults(r => [...r, resultObj]);
+          collectedResults.push({
+            agentId: out.agent_id,
+            agentName: out.agent_name || meta.name,
+            output: text,
+            task: tasksMap[out.agent_id] || meta.defaultTask,
+          });
+        }
+
+        // Stash structured data for the DATA panel.
+        if (out.output_data && typeof out.output_data === "object") {
+          setRunOutputs(prev => [...prev, out.output_data]);
+        }
+      }
+
+      const runState = status.run?.status;
+      if (runState === "done" || runState === "error") {
+        finalStatus = runState;
+        break;
+      }
+
+      await sleep(2500);
+    }
+
+    setOrchestrating(false);
+    setActiveChainStep(-1);
+    if (!cancelRef.current) setActiveFlow(prev => prev ? { ...prev, done: true } : prev);
+
+    // History + analytics + memory + version snapshot (mirrors client path).
+    addSession({
+      flowName: flow.name,
+      startedAt: runStartTime,
+      completedAt: Date.now(),
+      agentCount: chain.length,
+      results: chain.map(id => {
+        const meta = configAgents.find(a => a.id === id);
+        const r = collectedResults.find(x => x.agentId === id);
+        return { agentId: id, agentName: meta?.name || id, output: r?.output || "", task: r?.task || meta?.defaultTask || "" };
+      }),
+    });
+
+    const durationMs = Date.now() - runStartTime;
+    recordRun({ flowName: flow.name, agents: chain, durationMs, hadError: finalStatus === "error" });
+    fireWebhooks({ flowName: flow.name, agentCount: chain.length, results: collectedResults });
+
+    if (collectedResults.length > 0) {
+      const topOutput = collectedResults[0]?.output?.slice(0, 150) || "";
+      if (topOutput) addInsight(topOutput, flow.name);
+    }
+
+    saveVersion({
+      flowName: flow.name,
+      flowId: flow.id,
+      ranAt: runStartTime,
+      duration: durationMs,
+      agents: collectedResults.map(r => ({
+        id: r.agentId,
+        name: r.agentName,
+        task: r.task,
+        output: r.output,
+        status: "done",
+      })),
+    });
+  };
+
+  // Dispatcher: route to the server engine when signed-in + cloud configured,
+  // otherwise fall back to the existing client-side path.
+  const runOrchestration = (flow) =>
+    useServer ? runServerOrchestration(flow) : runClientOrchestration(flow);
 
   // Keep ref in sync so scheduler triggers use the latest runOrchestration
   useEffect(() => {
@@ -1208,6 +1467,11 @@ export default function AgenticDashboard() {
               <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#F0C04022", border: "1px solid #F0C04044", display: "flex", alignItems: "center", justifyContent: "center", color: "#F0C040", fontSize: 12, fontFamily: "'Syne', sans-serif", fontWeight: 700 }}>
                 {user.firstName?.[0] || user.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || "U"}
               </div>
+              {planId !== "free" && (
+                <button onClick={() => openPortal().catch(e => addCeoLog(`✗ ${e.message}`))} style={{ background: "#ffffff08", border: "1px solid #ffffff15", color: "#ffffff99", cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 10, padding: "4px 8px", borderRadius: 7 }} title="Manage your subscription">
+                  ⚙ BILLING
+                </button>
+              )}
               <button onClick={() => window.Clerk?.openSignOut?.()} style={{ background: "transparent", border: "none", color: "#ffffff44", cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 10 }}>
                 SIGN OUT
               </button>
@@ -1383,6 +1647,17 @@ export default function AgenticDashboard() {
               cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
             }}>
               📋 OUTPUT ({results.length})
+            </button>
+          )}
+          {runOutputs.length > 0 && (
+            <button onClick={() => setShowData(true)} style={{
+              background: showData ? "#F0C04022" : "#ffffff08",
+              border: `1px solid ${showData ? "#F0C04044" : "#ffffff15"}`,
+              color: showData ? "#F0C040" : "#ffffffcc",
+              padding: "7px 14px", borderRadius: 9,
+              cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
+            }}>
+              📊 DATA
             </button>
           )}
           <button onClick={() => setShowHistory(true)} style={{
@@ -1788,6 +2063,11 @@ export default function AgenticDashboard() {
           currentPlan={planId}
           onClose={() => setUpgradeModal(null)}
         />
+      )}
+
+      {/* ── DATA PANEL (structured leads / research) ── */}
+      {showData && (
+        <DataPanel runOutputs={runOutputs} onClose={() => setShowData(false)} />
       )}
 
       {/* ── MOBILE NAV ── */}

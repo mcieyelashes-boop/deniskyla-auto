@@ -1,4 +1,5 @@
 import { PLANS, FEATURE_META, getPlan } from "../config/plans";
+import { useBilling } from "../hooks/useBilling";
 
 const FONT_HEAD = "'Syne', sans-serif";
 const FONT_BODY = "'DM Sans', sans-serif";
@@ -36,6 +37,7 @@ export default function UpgradeModal({
   onClose,
   onUpgrade,
 }) {
+  const { startCheckout } = useBilling();
   const meta = feature ? FEATURE_META[feature] : null;
   const targetPlanId = meta?.minPlan || "pro";
   const current = getPlan(currentPlan);
@@ -68,11 +70,21 @@ export default function UpgradeModal({
     { key: "apiAccess", label: "API access" },
   ];
 
-  const handleUpgrade = () => {
+  const handleUpgrade = async () => {
     if (onUpgrade) {
       onUpgrade(targetPlanId);
-    } else if (typeof window !== "undefined") {
-      window.open(PRICING_URL, "_blank", "noopener,noreferrer");
+      return;
+    }
+    // Go straight to Stripe Checkout for the unlocking plan.
+    try {
+      await startCheckout(targetPlanId);
+    } catch (err) {
+      // Fallback to the landing pricing page if billing isn't available
+      // (not signed in, billing not configured, etc.).
+      console.warn("[UpgradeModal] checkout failed:", err?.message || err);
+      if (typeof window !== "undefined") {
+        window.open(PRICING_URL, "_blank", "noopener,noreferrer");
+      }
     }
   };
 
