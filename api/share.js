@@ -17,6 +17,14 @@ function shortId() {
 }
 
 export default async function handler(req, res) {
+  try {
+    return await route(req, res);
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "Internal error" });
+  }
+}
+
+async function route(req, res) {
   if (!applyCors(req, res)) return res.status(403).json({ error: "Forbidden" });
   if (req.method === "OPTIONS") return res.status(200).end();
 
