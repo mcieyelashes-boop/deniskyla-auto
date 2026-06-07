@@ -19,7 +19,6 @@ import { useScheduler } from "./hooks/useScheduler";
 import { useWebhook } from "./hooks/useWebhook";
 import { useIntegrations } from "./hooks/useIntegrations";
 import { useWorkspace } from "./hooks/useWorkspace";
-import { useCronScheduler } from "./hooks/useCronScheduler";
 import { buildChainedPrompt, extractChainContext } from "./lib/agentChain";
 import InstallBanner from "./components/InstallBanner";
 import FlowVersionsPanel from "./components/FlowVersionsPanel";
@@ -38,7 +37,6 @@ import { useCEOMemory } from "./hooks/useCEOMemory";
 import { useAgentScoring } from "./hooks/useAgentScoring";
 import ReportModal from "./components/ReportModal";
 import ResultsChat from "./components/ResultsChat";
-import EmbedModal from "./components/EmbedModal";
 import DependencyEditor from "./components/DependencyEditor";
 import { useTriggerPoller } from "./hooks/useTriggerPoller";
 import { useAgentDependencies } from "./hooks/useAgentDependencies";
@@ -684,7 +682,6 @@ export default function AgenticDashboard() {
 
   const { showOnboarding, completeOnboarding } = useOnboarding();
   const { workspaces, activeWorkspace, switchWorkspace, addWorkspace } = useWorkspace();
-  const { cronResults, syncSchedule, removeServerSchedule, triggerCronNow } = useCronScheduler();
 
   const { installPrompt, isInstalled, swReady, install } = usePWA();
   const { theme, themeName, toggleTheme } = useTheme();
@@ -757,7 +754,6 @@ export default function AgenticDashboard() {
   const [showFlowSuggester, setShowFlowSuggester] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [showEmbed, setShowEmbed] = useState(false);
   const [showDeps, setShowDeps] = useState(false);
 
   const addCeoLog = (text) =>
@@ -1554,13 +1550,6 @@ export default function AgenticDashboard() {
               }}>
                 💬 CHAT
               </button>
-              <button onClick={() => setShowEmbed(true)} style={{
-                background: "#ffffff08", border: "1px solid #ffffff15",
-                color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-              }}>
-                {"</>"}  EMBED
-              </button>
             </>
           )}
 
@@ -1926,15 +1915,11 @@ export default function AgenticDashboard() {
           flows={[...ORCHESTRA_FLOWS, { id: "custom", name: "Custom Flow" }]}
           onAdd={(schedule) => {
             addSchedule(schedule);
-            syncSchedule(schedule); // also sync to server-side cron
           }}
           onToggle={toggleSchedule}
           onRemove={(id) => {
             removeSchedule(id);
-            removeServerSchedule(id);
           }}
-          onTriggerNow={triggerCronNow}
-          cronResults={cronResults}
           onClose={() => setShowScheduler(false)}
         />
       )}
@@ -2006,14 +1991,6 @@ export default function AgenticDashboard() {
           duration={0}
           activeWorkspace={activeWorkspace}
           onClose={() => setShowReport(false)}
-        />
-      )}
-
-      {/* ── EMBED MODAL ── */}
-      {showEmbed && (
-        <EmbedModal
-          shareId={activeFlow?.id || "default"}
-          onClose={() => setShowEmbed(false)}
         />
       )}
 
