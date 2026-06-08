@@ -1,8 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { getAdmin, HAS_DB } from "../lib/server/supabaseAdmin.js";
 
-// Server-only env (NOT VITE_ prefixed)
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
 
 function cors(req, res) {
@@ -44,7 +41,7 @@ export default async function handler(req, res) {
   if (!cors(req, res)) return res.status(403).json({ error: "Forbidden" });
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+  if (!HAS_DB) {
     return res.status(501).json({ error: "Cloud storage not configured" });
   }
 
@@ -52,7 +49,8 @@ export default async function handler(req, res) {
   const userId = await verifyClerk(token);
   if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const sb = getAdmin();
+  if (!sb) return res.status(501).json({ error: "Cloud storage not configured" });
 
   if (req.method === "GET") {
     const key = req.query.key;
