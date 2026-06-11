@@ -21,6 +21,7 @@ import { useIntegrations } from "./hooks/useIntegrations";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { buildChainedPrompt, extractChainContext, applySiteContext } from "./lib/agentChain";
 import ConnectSiteModal from "./components/ConnectSiteModal";
+import ToolbarMenu from "./components/ToolbarMenu";
 import InstallBanner from "./components/InstallBanner";
 import FlowVersionsPanel from "./components/FlowVersionsPanel";
 import OutputEditor from "./components/OutputEditor";
@@ -1540,15 +1541,6 @@ export default function AgenticDashboard() {
             onClick={() => planId === "free" ? setUpgradeModal({ reason: "upgrade" }) : null}
           />
 
-          {/* Theme toggle */}
-          <button onClick={toggleTheme} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 10px", borderRadius: 9,
-            cursor: "pointer", fontSize: 14,
-          }} title={`Switch to ${themeName === "dark" ? "light" : "dark"} mode`}>
-            {themeName === "dark" ? "☀" : "🌙"}
-          </button>
-
           {/* View mode toggle: Grid / Kanban */}
           <div style={{ display: "flex", background: "#ffffff08", border: "1px solid #ffffff15", borderRadius: 9, overflow: "hidden" }}>
             <button onClick={() => setViewMode("grid")} style={{
@@ -1563,172 +1555,39 @@ export default function AgenticDashboard() {
             }}>▦ KANBAN</button>
           </div>
 
-          {/* CEO Memory */}
-          <button onClick={() => setShowMemory(true)} style={{
-            background: memory.businessName ? "#F0C04018" : "#ffffff08",
-            border: `1px solid ${memory.businessName ? "#F0C04033" : "#ffffff15"}`,
-            color: memory.businessName ? "#F0C040" : "#ffffffcc",
-            padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            🧠 MEMORY
-          </button>
+          {/* Overflow tools menu — collapses ~20 actions into one grouped dropdown */}
+          <ToolbarMenu
+            items={[
+              { id: "customflow", group: "Create", icon: "⊞", label: "Custom Flow", onClick: () => setShowFlowBuilder(true) },
+              { id: "addagent", group: "Create", icon: "⊕", label: "Add Agent", onClick: () => setShowAddAgent(true) },
+              { id: "templates", group: "Create", icon: "✦", label: "Templates", locked: !can("templates"), onClick: () => can("templates") ? setShowTemplates(true) : setUpgradeModal({ feature: "templates" }) },
+              { id: "suggest", group: "Create", icon: "✦", label: "AI Suggest", accent: "#A78BFA", active: showFlowSuggester, onClick: () => setShowFlowSuggester(p => !p) },
 
-          {/* Batch Runner */}
-          <button onClick={() => can("batchRunner") ? setShowBatch(true) : setUpgradeModal({ feature: "batchRunner" })} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ⊞ BATCH
-          </button>
+              { id: "batch", group: "Automate", icon: "⊞", label: "Batch Runner", locked: !can("batchRunner"), onClick: () => can("batchRunner") ? setShowBatch(true) : setUpgradeModal({ feature: "batchRunner" }) },
+              { id: "scheduler", group: "Automate", icon: "⏱", label: "Scheduler", locked: !can("scheduledFlows"), badge: schedules.filter(s=>s.enabled).length || "", onClick: () => can("scheduledFlows") ? setShowScheduler(true) : setUpgradeModal({ feature: "scheduledFlows" }) },
+              { id: "deps", group: "Automate", icon: "⇒", label: "Dependencies", onClick: () => setShowDeps(true) },
+              { id: "versions", group: "Automate", icon: "◑", label: "Versions", locked: !can("flowVersioning"), badge: versions.length || "", onClick: () => can("flowVersioning") ? setShowVersions(true) : setUpgradeModal({ feature: "flowVersioning" }) },
 
-          {/* Dependencies */}
-          <button onClick={() => setShowDeps(true)} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ⇒ DEPS
-          </button>
-          {results.length > 0 && (
-            <>
-              <button onClick={() => setShowReport(true)} style={{
-                background: "#ffffff08", border: "1px solid #ffffff15",
-                color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-              }}>
-                📄 REPORT
-              </button>
-              <button onClick={() => setShowChat(p => !p)} style={{
-                background: showChat ? "#A78BFA22" : "#ffffff08",
-                border: `1px solid ${showChat ? "#A78BFA44" : "#ffffff15"}`,
-                color: showChat ? "#A78BFA" : "#ffffffcc",
-                padding: "7px 14px", borderRadius: 9,
-                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-              }}>
-                💬 CHAT
-              </button>
-            </>
-          )}
+              ...(results.length > 0 ? [
+                { id: "output", group: "Results", icon: "📋", label: "Output", accent: "#38BDF8", active: showOutputPanel, badge: results.length, onClick: () => setShowOutputPanel(p => !p) },
+                { id: "report", group: "Results", icon: "📄", label: "Report", onClick: () => setShowReport(true) },
+                { id: "chat", group: "Results", icon: "💬", label: "Results Chat", accent: "#A78BFA", active: showChat, onClick: () => setShowChat(p => !p) },
+                { id: "share", group: "Results", icon: "↗", label: "Share", accent: "#34D399", onClick: () => setShowShare(true) },
+              ] : []),
+              ...(runOutputs.length > 0 ? [
+                { id: "data", group: "Results", icon: "📊", label: "Data / Audit", accent: "#F0C040", active: showData, onClick: () => setShowData(true) },
+              ] : []),
+              { id: "history", group: "Results", icon: "◷", label: "History", badge: sessions.length || "", onClick: () => setShowHistory(true) },
+              { id: "analytics", group: "Results", icon: "◎", label: "Analytics", badge: stats.totalRuns || "", onClick: () => setShowAnalytics(true) },
 
-          {/* Versions */}
-          <button onClick={() => can("flowVersioning") ? setShowVersions(true) : setUpgradeModal({ feature: "flowVersioning" })} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ◑ VERSIONS {versions.length > 0 ? `(${versions.length})` : ""}
-          </button>
+              { id: "integrations", group: "Connect", icon: "🔌", label: "Integrations", accent: "#F0C040", locked: !can("integrations"), badge: Object.values(integrations).filter(i => i.enabled).length || "", onClick: () => can("integrations") ? setShowIntegrations(true) : setUpgradeModal({ feature: "integrations" }) },
+              { id: "webhooks", group: "Connect", icon: "⬡", label: "Webhooks", accent: "#34D399", locked: !can("webhooks"), badge: webhooks.filter(w=>w.enabled).length || "", onClick: () => can("webhooks") ? setShowWebhook(true) : setUpgradeModal({ feature: "webhooks" }) },
+              { id: "memory", group: "Connect", icon: "🧠", label: "CEO Memory", accent: "#F0C040", active: !!memory.businessName, onClick: () => setShowMemory(true) },
 
-          {/* Share button — show when results exist */}
-          {results.length > 0 && (
-            <button onClick={() => setShowShare(true)} style={{
-              background: "#34D39918", border: "1px solid #34D39944",
-              color: "#34D399", padding: "7px 14px", borderRadius: 9,
-              cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-            }}>
-              ↗ SHARE
-            </button>
-          )}
+              { id: "theme", group: "Settings", icon: themeName === "dark" ? "☀" : "🌙", label: themeName === "dark" ? "Light mode" : "Dark mode", keepOpen: true, onClick: toggleTheme },
+            ]}
+          />
 
-          {/* AI Flow Suggester toggle */}
-          <button onClick={() => setShowFlowSuggester(p => !p)} style={{
-            background: showFlowSuggester ? "#A78BFA22" : "#ffffff08",
-            border: `1px solid ${showFlowSuggester ? "#A78BFA44" : "#ffffff15"}`,
-            color: showFlowSuggester ? "#A78BFA" : "#ffffffcc",
-            padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ✦ SUGGEST
-          </button>
-          <button onClick={() => can("templates") ? setShowTemplates(true) : setUpgradeModal({ feature: "templates" })} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ✦ TEMPLATES{!can("templates") ? " 🔒" : ""}
-          </button>
-          <button onClick={() => setShowAnalytics(true)} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ◎ ANALYTICS {stats.totalRuns > 0 ? `(${stats.totalRuns})` : ""}
-          </button>
-          <button onClick={() => can("scheduledFlows") ? setShowScheduler(true) : setUpgradeModal({ feature: "scheduledFlows" })} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ⏱ SCHEDULER {schedules.filter(s=>s.enabled).length > 0 ? `(${schedules.filter(s=>s.enabled).length})` : ""}{!can("scheduledFlows") ? " 🔒" : ""}
-          </button>
-          <button onClick={() => can("webhooks") ? setShowWebhook(true) : setUpgradeModal({ feature: "webhooks" })} style={{
-            background: webhooks.filter(w=>w.enabled).length > 0 ? "#34D39918" : "#ffffff08",
-            border: `1px solid ${webhooks.filter(w=>w.enabled).length > 0 ? "#34D39944" : "#ffffff15"}`,
-            color: webhooks.filter(w=>w.enabled).length > 0 ? "#34D399" : "#ffffffcc",
-            padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ⬡ WEBHOOKS {webhooks.filter(w=>w.enabled).length > 0 ? `(${webhooks.filter(w=>w.enabled).length})` : ""}{!can("webhooks") ? " 🔒" : ""}
-          </button>
-          {(() => {
-            const activeIntegrations = Object.values(integrations).filter(i => i.enabled).length;
-            return (
-              <button onClick={() => can("integrations") ? setShowIntegrations(true) : setUpgradeModal({ feature: "integrations" })} style={{
-                background: activeIntegrations > 0 ? "#F0C04018" : "#ffffff08",
-                border: `1px solid ${activeIntegrations > 0 ? "#F0C04044" : "#ffffff15"}`,
-                color: activeIntegrations > 0 ? "#F0C040" : "#ffffffcc",
-                padding: "7px 14px", borderRadius: 9,
-                cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-              }}>
-                🔌 INTEGRATIONS {activeIntegrations > 0 ? `(${activeIntegrations})` : ""}{!can("integrations") ? " 🔒" : ""}
-              </button>
-            );
-          })()}
-          {results.length > 0 && (
-            <button onClick={() => setShowOutputPanel(p => !p)} style={{
-              background: showOutputPanel ? "#38BDF822" : "#ffffff08",
-              border: `1px solid ${showOutputPanel ? "#38BDF844" : "#ffffff15"}`,
-              color: showOutputPanel ? "#38BDF8" : "#ffffffcc",
-              padding: "7px 14px", borderRadius: 9,
-              cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-            }}>
-              📋 OUTPUT ({results.length})
-            </button>
-          )}
-          {runOutputs.length > 0 && (
-            <button onClick={() => setShowData(true)} style={{
-              background: showData ? "#F0C04022" : "#ffffff08",
-              border: `1px solid ${showData ? "#F0C04044" : "#ffffff15"}`,
-              color: showData ? "#F0C040" : "#ffffffcc",
-              padding: "7px 14px", borderRadius: 9,
-              cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-            }}>
-              📊 DATA
-            </button>
-          )}
-          <button onClick={() => setShowHistory(true)} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ◷ HISTORY {sessions.length > 0 ? `(${sessions.length})` : ""}
-          </button>
-          <button onClick={() => setShowAddAgent(true)} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ⊕ ADD AGENT
-          </button>
-          <button onClick={() => setShowFlowBuilder(true)} style={{
-            background: "#ffffff08", border: "1px solid #ffffff15",
-            color: "#ffffffcc", padding: "7px 14px", borderRadius: 9,
-            cursor: "pointer", fontFamily: "'DM Mono', monospace", fontSize: 11,
-          }}>
-            ⊞ CUSTOM FLOW
-          </button>
           {(orchestrating || activeFlow) && (
             <button onClick={resetAll} style={{
               background: "#ef444418",
