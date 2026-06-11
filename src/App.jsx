@@ -19,7 +19,8 @@ import { useScheduler } from "./hooks/useScheduler";
 import { useWebhook } from "./hooks/useWebhook";
 import { useIntegrations } from "./hooks/useIntegrations";
 import { useWorkspace } from "./hooks/useWorkspace";
-import { buildChainedPrompt, extractChainContext } from "./lib/agentChain";
+import { buildChainedPrompt, extractChainContext, applySiteContext } from "./lib/agentChain";
+import ConnectSiteModal from "./components/ConnectSiteModal";
 import InstallBanner from "./components/InstallBanner";
 import FlowVersionsPanel from "./components/FlowVersionsPanel";
 import OutputEditor from "./components/OutputEditor";
@@ -654,6 +655,7 @@ export default function AgenticDashboard() {
   const [showScheduler, setShowScheduler] = useState(false);
   const [showWebhook, setShowWebhook] = useState(false);
   const [showIntegrations, setShowIntegrations] = useState(false);
+  const [showConnectSite, setShowConnectSite] = useState(false);
 
   const { stats, recordRun, resetStats } = useAnalytics();
   const { webhooks, addWebhook, toggleWebhook, removeWebhook, fireWebhooks } = useWebhook();
@@ -681,7 +683,12 @@ export default function AgenticDashboard() {
   });
 
   const { showOnboarding, completeOnboarding } = useOnboarding();
-  const { workspaces, activeWorkspace, switchWorkspace, addWorkspace } = useWorkspace();
+  const { workspaces, activeWorkspace, activeWorkspaceId, switchWorkspace, addWorkspace, updateWorkspace } = useWorkspace();
+
+  // Connected project (per-workspace): { url, brand } — see ConnectSiteModal.
+  const connectedSite = activeWorkspace?.site || null;
+  const saveSite = (site) => updateWorkspace(activeWorkspaceId, { site });
+  const clearSite = () => updateWorkspace(activeWorkspaceId, { site: null });
 
   const { installPrompt, isInstalled, swReady, install } = usePWA();
   const { theme, themeName, toggleTheme } = useTheme();
@@ -876,8 +883,10 @@ export default function AgenticDashboard() {
 
       try {
         if (effectiveHasApiKey) {
-          // Build a context-aware prompt chaining in previous agents' outputs
-          const chainedTask = buildChainedPrompt(agentId, taskForAgent, completedResults);
+          // Build a context-aware prompt: inject the connected site, then chain
+          // in previous agents' outputs.
+          const sitedTask = applySiteContext(agentId, taskForAgent, connectedSite);
+          const chainedTask = buildChainedPrompt(agentId, sitedTask, completedResults);
           await runClaudeStep(agentId, chainedTask);
         } else {
           await runFakeStep(agentId);
@@ -993,6 +1002,7 @@ export default function AgenticDashboard() {
     setActiveFlow(flow);
     setOrchestrating(true);
     setRunOutputs([]);
+    let producedAuditData = false;
 
     // Reset agents → queued for chain members.
     setAgents(prev => prev.map(a => ({
@@ -1015,7 +1025,7 @@ export default function AgenticDashboard() {
     setAgents(prev => {
       chain.forEach(id => {
         const a = prev.find(x => x.id === id);
-        if (a) tasksMap[id] = a.task;
+        if (a) tasksMap[id] = applySiteContext(id, a.task, connectedSite);
       });
       return prev;
     });
@@ -1143,6 +1153,9 @@ export default function AgenticDashboard() {
         // Stash structured data for the DATA panel.
         if (out.output_data && typeof out.output_data === "object") {
           setRunOutputs(prev => [...prev, out.output_data]);
+          if (out.output_data.kind === "seo" || out.output_data.kind === "geo") {
+            producedAuditData = true;
+          }
         }
       }
 
@@ -1158,6 +1171,9 @@ export default function AgenticDashboard() {
     setOrchestrating(false);
     setActiveChainStep(-1);
     if (!cancelRef.current) setActiveFlow(prev => prev ? { ...prev, done: true } : prev);
+
+    // Surface the score cards automatically once an audit produced SEO/GEO data.
+    if (producedAuditData && !cancelRef.current) setShowData(true);
 
     // History + analytics + memory + version snapshot (mirrors client path).
     addSession({
@@ -1200,6 +1216,27 @@ export default function AgenticDashboard() {
   // otherwise fall back to the existing client-side path.
   const runOrchestration = (flow) =>
     useServer ? runServerOrchestration(flow) : runClientOrchestration(flow);
+
+  // One-click full audit of the connected site: chains SEO → GEO against the URL.
+  const runSiteAudit = (site) => {
+    if (orchestrating) return;
+    const target = site || connectedSite;
+    if (!target?.url) { setShowConnectSite(true); return; }
+    const brandLabel = target.brand || target.url;
+    setShowConnectSite(false);
+    // Pre-fill the two audit agents' tasks (applySiteContext injects the URL).
+    setAgents(prev => prev.map(a => {
+      if (a.id === "seo") return { ...a, task: "Full on-page SEO audit" };
+      if (a.id === "geo") return { ...a, task: `Check AI search visibility for ${brandLabel}` };
+      return a;
+    }));
+    runOrchestration({
+      id: "site-audit",
+      name: "Site Audit",
+      desc: `Full SEO + GEO audit of ${brandLabel}`,
+      chain: ["seo", "geo"],
+    });
+  };
 
   // Keep ref in sync so scheduler triggers use the latest runOrchestration
   useEffect(() => {
@@ -1430,6 +1467,28 @@ export default function AgenticDashboard() {
             onSwitch={switchWorkspace}
             onAdd={addWorkspace}
           />
+          {/* Connected site pill */}
+          <button
+            onClick={() => setShowConnectSite(true)}
+            title={connectedSite ? `Connected: ${connectedSite.url}` : "Connect your site"}
+            style={{
+              display: "flex", alignItems: "center", gap: 7,
+              background: connectedSite ? "#34D39912" : "#ffffff08",
+              border: `1px solid ${connectedSite ? "#34D39933" : "#ffffff18"}`,
+              borderRadius: 999, padding: "6px 12px", cursor: "pointer",
+              fontFamily: "'DM Mono', monospace", fontSize: 11,
+              color: connectedSite ? "#34D399" : "#ffffff88", maxWidth: 220,
+            }}
+          >
+            <span style={{
+              width: 7, height: 7, borderRadius: 999, flexShrink: 0,
+              background: connectedSite ? "#34D399" : "#ffffff33",
+              boxShadow: connectedSite ? "0 0 8px #34D399" : "none",
+            }} />
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {connectedSite ? (connectedSite.brand || connectedSite.url.replace(/^https?:\/\//, "")) : "Connect site"}
+            </span>
+          </button>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {/* API key status indicator */}
@@ -1942,6 +2001,18 @@ export default function AgenticDashboard() {
           onUpdate={updateIntegration}
           onToggle={toggleIntegration}
           onClose={() => setShowIntegrations(false)}
+        />
+      )}
+
+      {/* ── CONNECT SITE ── */}
+      {showConnectSite && (
+        <ConnectSiteModal
+          site={connectedSite}
+          busy={orchestrating}
+          onSave={saveSite}
+          onClear={clearSite}
+          onRunAudit={runSiteAudit}
+          onClose={() => setShowConnectSite(false)}
         />
       )}
 

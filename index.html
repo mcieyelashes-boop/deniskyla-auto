@@ -3,16 +3,116 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>deniskyla.auto — Agentic Dashboard</title>
+
+    <!-- Primary SEO -->
+    <title>deniskyla.auto — AI Agent Orchestration Dashboard | CEO + 7 Sub-Agents</title>
+    <meta name="description" content="Agentic dashboard where a CEO AI agent orchestrates 7 specialized sub-agents: website dev, market research, lead gen, email campaigns, social media, content creation & scheduling. Powered by Claude API." />
+    <meta name="keywords" content="AI agent orchestration, agentic dashboard, multi-agent automation, Claude API, AI marketing automation, CEO agent, sub-agents, AI workflow automation" />
+    <meta name="author" content="deniskyla.auto" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://app.deniskyla.auto/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="deniskyla.auto" />
+    <meta property="og:title" content="deniskyla.auto — AI Agent Orchestration Dashboard" />
+    <meta property="og:description" content="One CEO agent. Seven specialized sub-agents. Run product launches, growth sprints, and content blitzes on autopilot — powered by Claude API." />
+    <meta property="og:url" content="https://app.deniskyla.auto/" />
+    <meta property="og:image" content="https://app.deniskyla.auto/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="deniskyla.auto — AI Agent Orchestration Dashboard" />
+    <meta name="twitter:description" content="One CEO agent orchestrating 7 specialized sub-agents. Product launches, growth sprints & content blitzes on autopilot." />
+    <meta name="twitter:image" content="https://app.deniskyla.auto/og-image.png" />
+
+    <!-- PWA -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#F0C040" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AgenticOS" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
+
+    <!-- Structured Data: SoftwareApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "deniskyla.auto",
+      "alternateName": "AgenticOS",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "url": "https://app.deniskyla.auto/",
+      "description": "AI agent orchestration dashboard. A CEO agent delegates work to 7 specialized sub-agents — website development, market research, lead generation, email campaigns, social media, content creation, and content scheduling — powered by the Claude API.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD",
+        "description": "Free tier available; paid plans for higher usage"
+      },
+      "featureList": [
+        "CEO agent orchestration with task delegation",
+        "7 specialized sub-agents",
+        "Orchestration presets: Product Launch, Growth Sprint, Content Blitz",
+        "Real-time progress and activity log per agent",
+        "Scheduling, batch runs, and webhooks",
+        "PWA — installable on mobile and desktop"
+      ],
+      "publisher": {
+        "@type": "Organization",
+        "name": "deniskyla.auto",
+        "url": "https://deniskyla.auto/"
+      }
+    }
+    </script>
+
+    <!-- Structured Data: FAQ -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is deniskyla.auto?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "deniskyla.auto is an agentic dashboard where a CEO AI agent orchestrates 7 specialized sub-agents to run marketing and business workflows — product launches, growth sprints, and content campaigns — automatically, powered by the Claude API."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which sub-agents are included?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Website Developer, Market Research, Lead Gen, Email Campaign, Social Media, Content Creation, and Content Scheduler — all coordinated by the CEO agent."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need my own API key?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "You can sign in and use the hosted plans, or bring your own Anthropic API key for direct usage."
+          }
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Crawlable fallback content (replaced by React on load) -->
+      <noscript>
+        <h1>deniskyla.auto — AI Agent Orchestration Dashboard</h1>
+        <p>A CEO AI agent orchestrates 7 specialized sub-agents — website development, market research, lead generation, email campaigns, social media, content creation, and scheduling — powered by the Claude API. JavaScript is required to use the dashboard.</p>
+      </noscript>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

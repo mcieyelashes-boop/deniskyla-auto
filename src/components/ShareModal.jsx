@@ -440,7 +440,6 @@ export default function ShareModal({ results = [], flowName, onClose }) {
                   onClick={copyUrl}
                   style={{
                     flexShrink: 0,
-                    border: "none",
                     borderRadius: 12,
                     padding: "0 18px",
                     fontFamily: FONT_HEAD,

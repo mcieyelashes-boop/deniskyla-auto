@@ -164,7 +164,7 @@ export default function DataPanel({ runOutputs = [], onClose }) {
               📊 Structured Data
             </div>
             <div style={{ color: "#ffffff55", fontSize: 11, fontFamily: FONT_MONO }}>
-              Leads &amp; research extracted from this run
+              Leads, research &amp; SEO/GEO audit from this run
             </div>
           </div>
           <button

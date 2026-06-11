@@ -3,7 +3,13 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // Allow running the dev server through the Projects/deniskyla-auto junction.
+  resolve: { preserveSymlinks: true },
+  preview: {
+    port: 5180,
+  },
   server: {
+    port: 5180,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',

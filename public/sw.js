@@ -1,5 +1,5 @@
 // Bump this version whenever caching strategy changes — old caches are purged on activate.
-const CACHE_NAME = "agentic-os-v2";
+const CACHE_NAME = "agentic-os-v3";
 const STATIC_ASSETS = ["/", "/index.html"];
 
 self.addEventListener("install", (e) => {

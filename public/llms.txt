@@ -1,0 +1,40 @@
+# deniskyla.auto
+
+> AI agent orchestration dashboard: a CEO agent delegates work to 7 specialized
+> sub-agents (Website Developer, Market Research, Lead Gen, Email Campaign,
+> Social Media, Content Creation, Content Scheduler), powered by the Claude API.
+
+deniskyla.auto (also called AgenticOS) lets solo founders and small teams run
+marketing and business workflows on autopilot. Instead of prompting one chatbot,
+you give a goal to the CEO agent, which breaks it down and delegates tasks to
+specialized sub-agents, tracks their progress in real time, and assembles the
+results.
+
+## Key facts
+
+- Product type: web app (PWA, installable on mobile and desktop)
+- App URL: https://app.deniskyla.auto/
+- Landing: https://deniskyla.auto/
+- Engine: Claude API (Anthropic)
+- Orchestration presets: Product Launch, Growth Sprint, Content Blitz
+- Features: real-time agent activity log, scheduling and cron runs, batch
+  runner, webhooks, flow versioning, exports (JSON/PDF), CEO memory,
+  Kanban board, command palette, share links
+- Auth: Clerk; Billing: Stripe; Storage: Supabase
+- Pricing: free tier available, paid plans for higher usage
+
+## Sub-agents
+
+1. Website Developer — builds and edits site copy/structure
+2. Market Research — competitor and market analysis
+3. Lead Gen — prospect lists and outreach targeting
+4. Email Campaign — sequences and campaign copy
+5. Social Media — platform-specific posts and calendars
+6. Content Creation — long-form articles and creatives
+7. Content Scheduler — publishing schedules and cadence
+
+## Pages
+
+- [Dashboard](https://app.deniskyla.auto/): main orchestration dashboard
+- [Product Launch flow](https://app.deniskyla.auto/?flow=launch): preset flow
+- [Growth Sprint flow](https://app.deniskyla.auto/?flow=growth): preset flow
