@@ -29,7 +29,9 @@ async function postBilling(path, body) {
 }
 
 export function useBilling() {
-  // Redirect the user to Stripe Checkout for the given plan.
+  // Redirect the user to Xendit Checkout for the given plan. Xendit covers both
+  // local Indonesian methods (QRIS, e-wallets, VA, retail) and international
+  // cards, so it serves both markets from an Indonesian entity.
   const startCheckout = useCallback(async (plan = "pro") => {
     const url = await postBilling("/api/billing/checkout", { plan });
     window.location.href = url;
