@@ -1,5 +1,7 @@
+import { exportAuditReport } from "../lib/export";
+
 // DataPanel — renders structured agent output (leads / research) from a server run.
-// Props: { runOutputs, onClose }
+// Props: { runOutputs, onClose, site? }
 //   runOutputs: array of output_data objects collected during a server run.
 //     - { leads: [{ name, email, company, emailStatus, score }] }
 //     - { insights: [...], sources: [...], summary }
@@ -84,6 +86,43 @@ function priorityColor(p) {
   return "#34D399";
 }
 
+// Small badge marking demo/sample audit data (client/simulation path).
+function SampleBadge() {
+  return (
+    <span
+      title="Illustrative sample data — connect a backend with an API key for real audits"
+      style={{
+        background: "#FBBF2418", border: "1px solid #FBBF2455", color: "#FBBF24",
+        padding: "1px 7px", borderRadius: 999, fontFamily: FONT_MONO, fontSize: 9,
+        letterSpacing: 1, textTransform: "uppercase", flexShrink: 0,
+      }}
+    >
+      Sample
+    </span>
+  );
+}
+
+// Build pass/fail chips from the SEO agent's technical{} block. Null-safe:
+// any missing field is simply skipped, so older audits without technical data
+// render nothing here.
+function techChips(t) {
+  if (!t) return [];
+  const chips = [];
+  chips.push({ label: t.https ? "HTTPS" : "no HTTPS", ok: !!t.https });
+  if (t.robotsTxt) chips.push({ label: t.robotsTxt.present ? "robots.txt" : "no robots.txt", ok: !!t.robotsTxt.present });
+  if (t.sitemapXml) chips.push({ label: t.sitemapXml.present ? `sitemap (${t.sitemapXml.urlCount || 0})` : "no sitemap", ok: !!t.sitemapXml.present });
+  chips.push({ label: t.langAttr ? `lang=${t.langAttr}` : "no lang", ok: !!t.langAttr });
+  if (typeof t.hreflangCount === "number") chips.push({ label: `hreflang ${t.hreflangCount}`, ok: t.hreflangCount > 0 });
+  chips.push({ label: t.favicon ? "favicon" : "no favicon", ok: !!t.favicon });
+  if (Array.isArray(t.schemaTypes)) chips.push({ label: t.schemaTypes.length ? `schema: ${t.schemaTypes.slice(0, 3).join(", ")}` : "no schema", ok: t.schemaTypes.length > 0 });
+  if (t.renderBlocking) {
+    const total = (t.renderBlocking.scripts || 0) + (t.renderBlocking.stylesheets || 0);
+    chips.push({ label: `${t.renderBlocking.scripts || 0}js/${t.renderBlocking.stylesheets || 0}css blocking`, ok: total <= 10 });
+  }
+  if (typeof t.htmlBytes === "number") chips.push({ label: `${Math.round(t.htmlBytes / 1024)}KB html`, ok: t.htmlBytes < 150000 });
+  return chips;
+}
+
 function buildLeadsCsv(leads) {
   const header = ["Name", "Email", "Company", "Email Status", "Score"];
   const escape = (v) => {
@@ -110,11 +149,12 @@ function downloadCsv(leads) {
   URL.revokeObjectURL(url);
 }
 
-export default function DataPanel({ runOutputs = [], onClose }) {
+export default function DataPanel({ runOutputs = [], onClose, site = null }) {
   const leads = collectLeads(runOutputs);
   const research = collectResearch(runOutputs);
   const seoReports = collectSeo(runOutputs);
   const geoReports = collectGeo(runOutputs);
+  const hasAudit = seoReports.length > 0 || geoReports.length > 0;
   const isEmpty =
     leads.length === 0 &&
     research.length === 0 &&
@@ -167,18 +207,37 @@ export default function DataPanel({ runOutputs = [], onClose }) {
               Leads, research &amp; SEO/GEO audit from this run
             </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "#ffffff66",
-              cursor: "pointer",
-              fontSize: 20,
-            }}
-          >
-            ✕
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {hasAudit && (
+              <button
+                onClick={() => exportAuditReport(runOutputs, { brand: site?.brand, site: site?.url })}
+                style={{
+                  background: `${GOLD}18`,
+                  border: `1px solid ${GOLD}44`,
+                  color: GOLD,
+                  padding: "7px 14px",
+                  borderRadius: 9,
+                  cursor: "pointer",
+                  fontFamily: FONT_MONO,
+                  fontSize: 11,
+                }}
+              >
+                ⬇ EXPORT REPORT
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#ffffff66",
+                cursor: "pointer",
+                fontSize: 20,
+              }}
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Empty state */}
@@ -194,7 +253,7 @@ export default function DataPanel({ runOutputs = [], onClose }) {
           >
             No structured data found in this run yet.
             <div style={{ marginTop: 6, fontSize: 11, fontFamily: FONT_MONO, color: "#ffffff33" }}>
-              Run a lead-gen or research flow to populate this panel.
+              Run an SEO Audit, GEO Visibility, Lead Gen, or Research flow to populate this panel.
             </div>
           </div>
         )}
@@ -460,8 +519,9 @@ export default function DataPanel({ runOutputs = [], onClose }) {
               return (
                 <div key={i} style={{ background: "#ffffff06", border: "1px solid #ffffff10", borderRadius: 12, padding: "16px 18px", marginBottom: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                    <div style={{ color: "#ffffffdd", fontFamily: FONT_MONO, fontSize: 11, wordBreak: "break-all" }}>
+                    <div style={{ color: "#ffffffdd", fontFamily: FONT_MONO, fontSize: 11, wordBreak: "break-all", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       {r.mode === "serp" ? `SERP: "${r.keyword || ""}"` : r.url || "audit"}
+                      {r.sample && <SampleBadge />}
                     </div>
                     <div style={{ color: scoreColorGrad(score), fontFamily: FONT_HEAD, fontWeight: 800, fontSize: 22 }}>
                       {score}<span style={{ fontSize: 12, color: "#ffffff44" }}>/100</span>
@@ -479,6 +539,56 @@ export default function DataPanel({ runOutputs = [], onClose }) {
                         ))}
                       </tbody>
                     </table>
+                  )}
+
+                  {Array.isArray(r.pages) && r.pages.length > 1 && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: FONT_MONO, letterSpacing: 1, marginBottom: 8 }}>
+                        PAGES AUDITED — {r.pages.length}{Number.isFinite(+r.siteScore) ? ` · site ${Math.round(r.siteScore)}/100` : ""}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        {r.pages.map((p, j) => {
+                          const ps = Number.isFinite(+p.score) ? Math.max(0, Math.min(100, +p.score)) : 0;
+                          return (
+                            <div key={j} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ color: scoreColorGrad(ps), fontFamily: FONT_MONO, fontSize: 11, minWidth: 30, textAlign: "right" }}>{ps}</span>
+                              <span style={{ color: "#ffffffaa", fontFamily: FONT_MONO, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {(p.url || "").replace(/^https?:\/\//, "")}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {r.technical && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: FONT_MONO, letterSpacing: 1, marginBottom: 8 }}>TECHNICAL</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {techChips(r.technical).map((t, j) => (
+                          <span key={j} style={{
+                            background: t.ok ? "#34D39915" : "#ef444415",
+                            border: `1px solid ${t.ok ? "#34D39940" : "#ef444440"}`,
+                            color: t.ok ? "#34D399" : "#ef8888",
+                            padding: "3px 9px", borderRadius: 8, fontFamily: FONT_MONO, fontSize: 11,
+                          }}>{t.label}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {Array.isArray(r.brokenLinks) && r.brokenLinks.length > 0 && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ color: "#ef4444", fontSize: 10, fontFamily: FONT_MONO, letterSpacing: 1, marginBottom: 8 }}>BROKEN LINKS — {r.brokenLinks.length}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {r.brokenLinks.slice(0, 8).map((b, j) => (
+                          <div key={j} style={{ color: "#ffffff99", fontFamily: FONT_MONO, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span style={{ color: "#ef4444" }}>{b.status || "ERR"}</span> {(b.url || "").replace(/^https?:\/\//, "")}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
 
                   {r.mode === "serp" && Array.isArray(r.keywords) && r.keywords.length > 0 && (
@@ -528,11 +638,12 @@ export default function DataPanel({ runOutputs = [], onClose }) {
               return (
                 <div key={i} style={{ background: "#ffffff06", border: "1px solid #ffffff10", borderRadius: 12, padding: "16px 18px", marginBottom: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                    <div style={{ color: "#ffffffdd", fontFamily: FONT_MONO, fontSize: 12 }}>
-                      {r.brand || "brand"}{r.domain ? ` · ${r.domain}` : ""}
+                    <div style={{ color: "#ffffffdd", fontFamily: FONT_MONO, fontSize: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span>{r.brand || "brand"}{r.domain ? ` · ${r.domain}` : ""}
                       {Array.isArray(r.engines) && r.engines.length ? (
                         <span style={{ color: "#ffffff44", fontSize: 10 }}> · {r.engines.join(", ")}</span>
-                      ) : null}
+                      ) : null}</span>
+                      {r.sample && <SampleBadge />}
                     </div>
                     <div style={{ color: scoreColorGrad(score), fontFamily: FONT_HEAD, fontWeight: 800, fontSize: 22 }}>
                       {score}<span style={{ fontSize: 12, color: "#ffffff44" }}>%</span>
@@ -554,6 +665,39 @@ export default function DataPanel({ runOutputs = [], onClose }) {
                                 {c.query}
                               </span>
                             </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {Array.isArray(r.engineBreakdown) && r.engineBreakdown.length > 0 && (
+                    <div style={{ marginBottom: recs.length || (r.competitors && r.competitors.length) ? 14 : 0 }}>
+                      <div style={{ color: "#ffffff44", fontSize: 10, fontFamily: FONT_MONO, letterSpacing: 1, marginBottom: 8 }}>BY ENGINE</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {r.engineBreakdown.map((e, j) => {
+                          const rate = Math.max(0, Math.min(100, Math.round(+e.rate || 0)));
+                          return (
+                            <span key={j} style={{ background: "#ffffff08", border: "1px solid #ffffff15", color: "#ffffffcc", padding: "3px 9px", borderRadius: 8, fontFamily: FONT_MONO, fontSize: 11 }}>
+                              {e.engine}: <span style={{ color: scoreColorGrad(rate) }}>{rate}%</span> <span style={{ color: "#ffffff55" }}>({e.mentions ?? 0}/{e.checks ?? 0})</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {Array.isArray(r.competitors) && r.competitors.length > 0 && (
+                    <div style={{ marginBottom: recs.length ? 14 : 0 }}>
+                      <div style={{ color: "#FBBF24", fontSize: 10, fontFamily: FONT_MONO, letterSpacing: 1, marginBottom: 8 }}>COMPETITORS CITED INSTEAD</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {r.competitors.map((c, j) => {
+                          const name = typeof c === "string" ? c : (c.name || c.brand || "");
+                          const count = typeof c === "object" && c.mentions != null ? ` ×${c.mentions}` : "";
+                          return (
+                            <span key={j} style={{ background: "#FBBF2415", border: "1px solid #FBBF2440", color: "#FBBF24", padding: "3px 9px", borderRadius: 8, fontFamily: FONT_MONO, fontSize: 11 }}>
+                              {name}{count}
+                            </span>
                           );
                         })}
                       </div>

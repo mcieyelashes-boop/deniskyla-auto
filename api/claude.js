@@ -1,3 +1,12 @@
+import { rateLimit } from "../lib/server/rateLimit.js";
+
+// Best-effort client IP from Vercel's proxy headers (for abuse rate-limiting).
+function clientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
+}
+
 // Allow a request origin if it matches the configured origin(s), localhost,
 // or any *.vercel.app deploy (preview + production). ALLOWED_ORIGIN may be a
 // comma-separated list.
@@ -63,6 +72,26 @@ export default async function handler(req, res) {
   }
   if (system && (typeof system !== "string" || system.length > 4000)) {
     return res.status(400).json({ error: "system too long or invalid" });
+  }
+
+  // Abuse guard: per-IP rate limit. This endpoint is unauthenticated (so the
+  // no-login demo works) and can fall back to the server ANTHROPIC_API_KEY, so
+  // cap calls per IP to prevent a spoofed-Origin client from draining the key.
+  // DB-backed; if no DB is configured the limiter fails open (demo mode).
+  try {
+    const ip = clientIp(req);
+    const { allowed, resetAt } = await rateLimit({
+      clerkUserId: `ip:${ip}`,
+      bucket: "claude",
+      max: 40,
+      windowSec: 60,
+    });
+    if (!allowed) {
+      res.setHeader("Retry-After", "60");
+      return res.status(429).json({ error: "Rate limit exceeded. Try again shortly.", resetAt });
+    }
+  } catch {
+    /* limiter failure must never block legitimate traffic */
   }
 
   const body = {

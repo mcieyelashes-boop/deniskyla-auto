@@ -3,6 +3,9 @@ import { useState, useEffect, useRef, useMemo } from "react";
 // ─── STATIC COMMANDS ────────────────────────────────────────────────────────────
 
 const COMMANDS = [
+  { id: "run-seo", label: "Run SEO Audit", icon: "🔍", category: "Flows", action: "run-flow", flowId: "seo_audit" },
+  { id: "run-geo", label: "Run GEO Visibility", icon: "🤖", category: "Flows", action: "run-flow", flowId: "geo_visibility" },
+  { id: "run-search", label: "Run Full Search Presence", icon: "🎯", category: "Flows", action: "run-flow", flowId: "search_presence" },
   { id: "run-launch", label: "Run Product Launch", icon: "🚀", category: "Flows", action: "run-flow", flowId: "launch" },
   { id: "run-growth", label: "Run Growth Sprint", icon: "📈", category: "Flows", action: "run-flow", flowId: "growth" },
   { id: "run-content", label: "Run Content Blitz", icon: "✦", category: "Flows", action: "run-flow", flowId: "content_blitz" },

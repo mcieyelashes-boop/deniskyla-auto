@@ -27,10 +27,15 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Auth
+  // Auth — fail CLOSED. If no TRIGGER_KEYS are configured the external trigger
+  // API is disabled entirely (rather than left open to anyone). A valid key is
+  // always required.
   const key = req.method === "GET" ? req.query.key : (req.body?.key || req.headers["x-trigger-key"]);
   const validKeys = (process.env.TRIGGER_KEYS || "").split(",").map(k => k.trim()).filter(Boolean);
-  if (validKeys.length > 0 && !validKeys.includes(key)) {
+  if (validKeys.length === 0) {
+    return res.status(403).json({ error: "Trigger API disabled — set TRIGGER_KEYS to enable." });
+  }
+  if (!key || !validKeys.includes(key)) {
     return res.status(401).json({ error: "Invalid trigger key" });
   }
 

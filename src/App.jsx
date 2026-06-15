@@ -20,6 +20,7 @@ import { useWebhook } from "./hooks/useWebhook";
 import { useIntegrations } from "./hooks/useIntegrations";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { buildChainedPrompt, extractChainContext, applySiteContext } from "./lib/agentChain";
+import { sampleOutputFor } from "./lib/sampleAudit";
 import ConnectSiteModal from "./components/ConnectSiteModal";
 import ToolbarMenu from "./components/ToolbarMenu";
 import InstallBanner from "./components/InstallBanner";
@@ -84,6 +85,24 @@ const makeInitialAgents = () =>
   AGENTS.map(a => ({ ...a, status: "idle", progress: 0, task: a.defaultTask, logs: ["Standby — menunggu perintah CEO"] }));
 
 const ORCHESTRA_FLOWS = [
+  {
+    id: "seo_audit",
+    name: "🔍 SEO Audit",
+    desc: "On-page + technical audit lalu rekomendasi web",
+    chain: ["seo", "webdev"],
+  },
+  {
+    id: "geo_visibility",
+    name: "🤖 GEO Visibility",
+    desc: "Cek sitasi brand di AI + konten penangkalnya",
+    chain: ["geo", "content"],
+  },
+  {
+    id: "search_presence",
+    name: "🎯 Full Search Presence",
+    desc: "SEO + GEO + konten — dominasi search & AI answers",
+    chain: ["seo", "geo", "content"],
+  },
   {
     id: "launch",
     name: "🚀 Product Launch",
@@ -855,6 +874,8 @@ export default function AgenticDashboard() {
     const chain = resolveChain(flow.chain);
     setActiveFlow(flow);
     setOrchestrating(true);
+    setRunOutputs([]);
+    let producedAuditData = false;
     recordFlow();
 
     // Reset all agents
@@ -896,6 +917,11 @@ export default function AgenticDashboard() {
         setAgents(prev => prev.map(a =>
           a.id === agentId ? { ...a, status: "done", progress: 100 } : a
         ));
+
+        // Client/simulation path can't really scrape (CORS) — surface clearly
+        // labelled SAMPLE audit data so the SEO/GEO score cards are demoable.
+        const sample = sampleOutputFor(agentId, connectedSite);
+        if (sample) { setRunOutputs(prev => [...prev, sample]); producedAuditData = true; }
 
         // Capture output for chaining context (excluding control lines)
         let agentOutput = "";
@@ -949,6 +975,9 @@ export default function AgenticDashboard() {
     setOrchestrating(false);
     setActiveChainStep(-1);
     if (!cancelRef.current) setActiveFlow(prev => prev ? { ...prev, done: true } : prev);
+
+    // Auto-open the score cards once an audit produced SEO/GEO data (mirrors server path).
+    if (producedAuditData && !cancelRef.current) setShowData(true);
 
     // Save session to history
     addSession({
@@ -1974,7 +2003,7 @@ export default function AgenticDashboard() {
 
       {/* ── DATA PANEL (structured leads / research) ── */}
       {showData && (
-        <DataPanel runOutputs={runOutputs} onClose={() => setShowData(false)} />
+        <DataPanel runOutputs={runOutputs} onClose={() => setShowData(false)} site={connectedSite} />
       )}
 
       {/* ── MOBILE NAV ── */}
