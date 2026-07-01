@@ -51,4 +51,4 @@ User-agent: Bytespider
 Allow: /
 Disallow: /api/
 
-Sitemap: https://app.deniskyla.auto/sitemap.xml
+Sitemap: https://deniskyla-auto.vercel.app/sitemap.xml

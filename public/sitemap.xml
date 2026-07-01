@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://app.deniskyla.auto/</loc>
+    <loc>https://deniskyla-auto.vercel.app/</loc>
     <lastmod>2026-06-10</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://app.deniskyla.auto/?flow=launch</loc>
+    <loc>https://deniskyla-auto.vercel.app/?flow=launch</loc>
     <lastmod>2026-06-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://app.deniskyla.auto/?flow=growth</loc>
+    <loc>https://deniskyla-auto.vercel.app/?flow=growth</loc>
     <lastmod>2026-06-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>

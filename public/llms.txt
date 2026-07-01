@@ -13,7 +13,7 @@ results.
 ## Key facts
 
 - Product type: web app (PWA, installable on mobile and desktop)
-- App URL: https://app.deniskyla.auto/
+- App URL: https://deniskyla-auto.vercel.app/
 - Landing: https://deniskyla.auto/
 - Engine: Claude API (Anthropic)
 - Orchestration presets: Product Launch, Growth Sprint, Content Blitz
@@ -35,6 +35,6 @@ results.
 
 ## Pages
 
-- [Dashboard](https://app.deniskyla.auto/): main orchestration dashboard
-- [Product Launch flow](https://app.deniskyla.auto/?flow=launch): preset flow
-- [Growth Sprint flow](https://app.deniskyla.auto/?flow=growth): preset flow
+- [Dashboard](https://deniskyla-auto.vercel.app/): main orchestration dashboard
+- [Product Launch flow](https://deniskyla-auto.vercel.app/?flow=launch): preset flow
+- [Growth Sprint flow](https://deniskyla-auto.vercel.app/?flow=growth): preset flow
